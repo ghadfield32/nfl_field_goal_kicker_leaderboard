@@ -1,0 +1,6 @@
+current_streak
+rolling_success_rate
+age_at_attempt
+career_length_years
+season_progress
+attempt_yards

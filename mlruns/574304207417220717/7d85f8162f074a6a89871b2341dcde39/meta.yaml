@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/7d85f8162f074a6a89871b2341dcde39/artifacts
+end_time: 1751841135855
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: 7d85f8162f074a6a89871b2341dcde39
+run_name: unruly-fox-256
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751841132157
+status: 3
+tags: []
+user_id: root

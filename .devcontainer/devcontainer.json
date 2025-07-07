@@ -1,0 +1,51 @@
+{
+  "name": "docker_dev_template_uv",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "datascience",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "runArgs": ["--gpus", "all"],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter",
+        "ms-toolsai.jupyter-renderers"
+      ],
+      "settings": {
+        // 1. COMPREHENSIVE TELEMETRY SETTINGS
+        "telemetry.telemetryLevel": "off",
+        "python.telemetry.enabled": false,
+        "jupyter.telemetry.enabled": false,
+        "jupyter.experiments.enabled": false,
+        "update.mode": "manual",
+        "extensions.autoUpdate": false,
+        "extensions.autoCheckUpdates": false,
+
+        // 2. MOVE HEAVY EXTENSIONS TO LOCAL UI HOST
+        "remote.extensionKind": {
+          "ms-python.python": ["ui"],
+          "ms-python.vscode-pylance": ["ui"],
+          "ms-toolsai.jupyter": ["ui"],
+          "ms-toolsai.jupyter-renderers": ["ui"]
+        },
+
+        // 3. PYTHON AND JUPYTER SETTINGS
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "jupyter.interactiveWindow.textEditor.executeSelection": true,
+        "jupyter.widgetScriptSources": ["jsdelivr.com", "unpkg.com"]
+      }
+    }
+  },
+  "remoteEnv": {
+    "JUPYTER_ENABLE_LAB": "true"
+  },
+
+  // After container creation, set up env, check UV, Python, and key libs
+  "postCreateCommand": [
+    "/bin/sh",
+    "-c",
+    ".devcontainer/setup_env.sh && \\\necho '## uv diagnostics ##' && uv --version && \\\necho '## python ##' && which python && python -V && \\\nexec .devcontainer/verify_env.py"
+  ]
+}

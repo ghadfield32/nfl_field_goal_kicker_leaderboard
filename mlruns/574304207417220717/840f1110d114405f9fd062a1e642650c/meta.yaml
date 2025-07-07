@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/840f1110d114405f9fd062a1e642650c/artifacts
+end_time: 1751841132140
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: 840f1110d114405f9fd062a1e642650c
+run_name: ambitious-rook-179
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751841128824
+status: 3
+tags: []
+user_id: root

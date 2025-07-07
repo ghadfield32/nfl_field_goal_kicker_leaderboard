@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/cba369c61bc544c682161d3daea9b294/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: cba369c61bc544c682161d3daea9b294
+run_name: gentle-crow-22
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751853658221
+status: 1
+tags: []
+user_id: root

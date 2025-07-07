@@ -1,0 +1,99 @@
+# docker-compose.yml
+name: ${ENV_NAME:-docker_dev_template}
+
+services:
+  datascience:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        PYTHON_VER: ${PYTHON_VER:-3.10}
+        ENV_NAME: ${ENV_NAME:-docker_dev_template}
+        JAX_PREALLOCATE: ${XLA_PYTHON_CLIENT_PREALLOCATE:-true}
+        JAX_MEM_FRAC: ${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.95}
+        JAX_ALLOCATOR: ${XLA_PYTHON_CLIENT_ALLOCATOR:-platform}
+        JAX_PREALLOC_LIMIT: ${JAX_PREALLOCATION_SIZE_LIMIT_BYTES:-8589934592}
+
+    # (Removed explicit container_name to avoid "already in use" conflicts.)
+
+    # Enhanced restart policy to handle port conflicts
+    restart: unless-stopped
+
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
+    gpus: all
+
+    environment:
+      - PYTHON_VER=${PYTHON_VER}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
+      - JAX_PLATFORM_NAME=${JAX_PLATFORM_NAME}
+      - XLA_PYTHON_CLIENT_PREALLOCATE=${XLA_PYTHON_CLIENT_PREALLOCATE}
+      - XLA_PYTHON_CLIENT_ALLOCATOR=${XLA_PYTHON_CLIENT_ALLOCATOR}
+      - XLA_PYTHON_CLIENT_MEM_FRACTION=${XLA_PYTHON_CLIENT_MEM_FRACTION}
+      - XLA_FLAGS=${XLA_FLAGS}
+      - JAX_DISABLE_JIT=${JAX_DISABLE_JIT}
+      - JAX_ENABLE_X64=${JAX_ENABLE_X64}
+      - TF_FORCE_GPU_ALLOW_GROWTH=${TF_FORCE_GPU_ALLOW_GROWTH}
+      - JAX_PREALLOCATION_SIZE_LIMIT_BYTES=${JAX_PREALLOCATION_SIZE_LIMIT_BYTES}
+
+    volumes:
+      - .:/workspace
+      - ./mlruns:/workspace/mlruns        # new
+
+    ports:
+      # Enhanced port configuration with fallback options
+      - "${HOST_JUPYTER_PORT:-8890}:8888"
+      - "${HOST_TENSORBOARD_PORT:-}:6008"
+      - "${HOST_EXPLAINER_PORT:-8050}:8050"
+      - "${HOST_STREAMLIT_PORT:-}:8501"
+
+    command: >
+      jupyter lab
+        --ip=0.0.0.0
+        --port=8888
+        --allow-root
+        --NotebookApp.token="${JUPYTER_TOKEN:-jupyter}"
+        --NotebookApp.allow_origin='*'
+
+    healthcheck:
+      test: ["CMD-SHELL", "bash --version && uv --help || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+    # Enhanced labels for better debugging
+    labels:
+      - "com.docker.compose.project=${ENV_NAME:-docker_dev_template}"
+      - "com.docker.compose.service=datascience"
+      - "description=AI/ML Development Environment with GPU Support"
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow.db
+      --default-artifact-root /mlflow_artifacts
+    environment:
+      MLFLOW_EXPERIMENTS_DEFAULT_ARTIFACT_LOCATION: /mlflow_artifacts
+    volumes:
+      - ./mlruns:/mlflow_artifacts    # artifacts + run metadata
+      - ./mlflow_db:/mlflow_db        # SQLite backend store
+    ports:
+      - "${HOST_MLFLOW_PORT:-5000}:5000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL",
+             "python - <<'PY'\nimport requests,sys; requests.get('http://localhost:5000/health').raise_for_status()\nPY"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+
+
+

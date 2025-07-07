@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/f4bb268731a94b3ba59c1ffb457966d0/artifacts
+end_time: 1751856339228
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: f4bb268731a94b3ba59c1ffb457966d0
+run_name: abrasive-fawn-285
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751856335201
+status: 3
+tags: []
+user_id: root

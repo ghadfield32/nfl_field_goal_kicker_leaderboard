@@ -1,0 +1,13 @@
+{
+    "http.proxySupport": "off",
+    "update.mode": "manual",
+    "extensions.autoUpdate": false,
+    "extensions.autoCheckUpdates": false,
+    "python.defaultInterpreterPath": "/app/.venv/bin/python",
+    "jupyter.interactiveWindow.textEditor.executeSelection": true,
+    "jupyter.widgetScriptSources": ["jsdelivr.com", "unpkg.com"],
+    "jupyter.experiments.enabled": false,
+    "jupyter.telemetry.enabled": false,
+    "python.telemetry.enabled": false,
+    "telemetry.telemetryLevel": "off"
+} 

@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/cc143822c81f4721984eb67c1d9c860f/artifacts
+end_time: 1751841125140
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: cc143822c81f4721984eb67c1d9c860f
+run_name: handsome-toad-547
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751841120256
+status: 3
+tags: []
+user_id: root

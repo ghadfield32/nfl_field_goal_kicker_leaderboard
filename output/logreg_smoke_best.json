@@ -1,0 +1,6 @@
+{
+  "logreg_smoke": {
+    "version": "latest",
+    "accuracy": 1.0
+  }
+}

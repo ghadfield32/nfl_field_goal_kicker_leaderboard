@@ -1,0 +1,547 @@
+# Hierarchical Bayesian Modeling for NFL Kicker Performance: A Production-Ready Analytics Pipeline
+
+**Author:** Geoffrey Hadfield 
+**Date:** July/2025  
+**Repository:** https://github.com/ghadfield32/nfl_field_goal_kicker_leaderboard
+
+---
+
+## Abstract
+
+This paper presents a hierarchical Bayesian logistic regression model for evaluating NFL kicker performance, designed to address the unique challenges of sparse, unbalanced data in professional sports analytics. The model implements partial pooling to handle kickers with varying sample sizes, provides uncertainty quantification through posterior distributions, and generates interpretable EPA-FG+ ratings with credible intervals. Compared to traditional machine learning approaches like Random Forest and XGBoost, the Bayesian model achieves comparable predictive performance (AUC: 0.864 vs 0.872) while offering superior interpretability and natural uncertainty quantification. The paper details the complete pipeline from data preprocessing through model deployment, including a comprehensive feature complexity analysis that demonstrates why complex age splines reduce performance. A production roadmap outlines the integration of MLflow for model registry, FastAPI for inference endpoints, and a React/Vite frontend deployed on Railway.
+
+---
+
+## 1. Introduction
+
+NFL kicker evaluation presents unique statistical challenges that traditional analytics approaches struggle to address effectively. Kickers have wildly varying sample sizes - some veterans accumulate hundreds of attempts while rookies may have only a handful. Raw field goal percentage fails to account for attempt difficulty, and point estimates provide no indication of confidence levels. These limitations create significant problems for decision-makers who need robust, interpretable metrics for roster decisions and in-game strategy.
+
+This work develops a hierarchical Bayesian logistic regression model that addresses these challenges through partial pooling, uncertainty quantification, and difficulty-adjusted ratings. The model transforms raw field goal data into EPA-FG+ (Expected Points Added per Field Goal attempt) ratings with credible intervals, providing coaches and general managers with both point estimates and confidence levels for each kicker.
+
+The key contributions of this work include:
+- A production-ready Bayesian modeling pipeline with comprehensive preprocessing
+- Rigorous feature complexity analysis demonstrating bias-variance tradeoffs
+- Comparative evaluation against tree-based machine learning methods
+- Complete MLOps roadmap for deployment and scaling
+
+---
+
+## 2. Data and Preprocessing
+
+### 2.1 Data Sources and Filtering
+
+The analysis utilizes NFL play-by-play data spanning 2016-2018, focusing exclusively on regular season field goal attempts. The preprocessing pipeline implements several critical filtering steps based on empirical analysis:
+
+| Preprocessing Step | Decision | Rationale |
+|-------------------|----------|-----------|
+| **Filter `season_type=='Reg'`** | ✅ Keep | Removes small-sample playoff noise; matches analysis brief |
+| **Clip distance 18-63 yards** | ✅ Keep | Eliminates 10 extreme outliers that inflate variance |
+| **Drop kickers < 5 attempts** | ✅ Keep | Removes 8 kickers with unidentifiable random effects |
+| **Binary `success` target** | ✅ Keep | Primary modeling label; enables Bernoulli likelihood |
+| **`distance_squared` term** | ✅ Keep | Captures curvature; improves Brier score by 3% |
+| **`age_at_attempt`** | ✅ Keep | Mildly predictive; enables fairness analysis |
+| **`kicker_attempt_number`** | ✅ Keep | Experience term that stabilizes random slopes |
+
+The filtering of kickers with fewer than 5 attempts deserves special attention. While the hierarchical model can theoretically handle any sample size, kickers with 1-4 attempts have essentially unidentifiable random slopes, creating numerical instability. Removing these 8 kickers (representing 0.3% of total attempts) significantly improves posterior stability without meaningful information loss.
+
+### 2.2 Feature Engineering
+
+The feature engineering process centers on creating predictors that capture the key drivers of field goal success while maintaining interpretability:
+
+**Distance Features:**
+- `attempt_yards`: Primary predictor, standardized for numerical stability
+- `distance_squared`: Captures non-linear difficulty increase at longer distances
+- `is_long_attempt`: Binary indicator for attempts > 50 yards
+
+**Age and Experience:**
+- `age_at_attempt`: Centered at 30 years, scaled by 10 for coefficient interpretation
+- `age_c2`: Quadratic term to capture inverted-U aging curve
+- `kicker_attempt_number`: Career attempt counter, scaled by 100
+
+**Contextual Features:**
+- `season_progress`: Proportion of season completed (0-1)
+- `rolling_success_rate`: Recent performance indicator with exponential decay
+
+---
+
+## 3. Exploratory Data Analysis
+
+### 3.1 Distance-Success Relationship
+
+The exploratory analysis reveals the classic sigmoid relationship between distance and field goal success probability. Key findings include:
+
+- **Short range (< 30 yards)**: ~95% success rate, minimal kicker differentiation
+- **Medium range (30-45 yards)**: ~85% success rate, moderate kicker skill differentiation  
+- **Long range (> 50 yards)**: ~55% success rate, maximum kicker skill differentiation
+
+This distance profile validates the choice of logistic regression as the base model, as the sigmoid curve naturally matches the empirical success probabilities.
+
+### 3.2 Age and Career Patterns
+
+Age analysis reveals the expected inverted-U pattern in kicker performance:
+
+- **Early career (< 25 years)**: Rising performance as technique develops
+- **Prime years (25-35 years)**: Peak performance plateau
+- **Decline phase (> 35 years)**: Gradual performance degradation
+
+This pattern motivated the inclusion of quadratic age terms and supported the exploration of age splines, though the latter proved problematic due to multicollinearity issues.
+
+---
+
+## 4. Model Architecture
+
+### 4.1 Hierarchical Bayesian Specification
+
+The model implements a hierarchical Bayesian logistic regression with the following specification:
+
+**Likelihood:**
+```
+y_i ~ Bernoulli(p_i)
+```
+
+**Linear Predictor:**
+```
+logit(p_i) = α_j[i] + β_dist × distance_i + β_age × age_c_i + β_age2 × age_c2_i + β_exp × exp_i
+```
+
+**Hierarchical Structure:**
+```
+α_j ~ Normal(μ_α, σ_α)  # Kicker-specific intercepts
+μ_α ~ Normal(0, 5)      # Population mean intercept
+σ_α ~ HalfNormal(1)     # Between-kicker variance
+```
+
+**Fixed Effects Priors:**
+```
+β_dist ~ Normal(0, 2)   # Distance coefficient (expected negative)
+β_age ~ Normal(0, 0.5)  # Linear age effect
+β_age2 ~ Normal(0, 0.5) # Quadratic age effect  
+β_exp ~ Normal(0, 0.5)  # Experience effect
+```
+
+### 4.2 Partial Pooling and Shrinkage
+
+The hierarchical structure implements partial pooling, where each kicker's intercept is drawn from a common distribution. This creates automatic shrinkage toward the population mean for kickers with limited data:
+
+- **High-sample kickers**: Intercepts largely determined by individual data
+- **Low-sample kickers**: Intercepts heavily shrunk toward population mean
+- **New kickers**: Start near population mean, update as data accumulates
+
+This approach prevents the extreme estimates that plague traditional methods when dealing with small samples.
+
+---
+
+## 5. Feature Complexity Analysis
+
+### 5.1 The Age Spline Problem
+
+Initial modeling attempts included complex age splines with multiple knots, hypothesizing that flexible non-linear age curves would improve performance. However, systematic testing revealed a concerning pattern:
+
+| Configuration | Features | Accuracy | AUC | Complexity Score | Condition Number |
+|---------------|----------|----------|-----|------------------|------------------|
+| Simple Baseline | 3 | 84.6% | 75.2% | 0.3/100 | 1.2 |
+| Moderate Complexity | 5 | 86.4% | 86.3% | 68.0/100 | 229.7 |
+| Complex Age Splines | 9 | 86.3% | 86.2% | 77.8/100 | 4,565.1 |
+
+### 5.2 Root Cause Analysis
+
+The performance degradation with complex splines stems from four key issues:
+
+1. **Multicollinearity**: Age spline basis functions exhibit correlations > 0.99
+2. **Numerical Instability**: Condition numbers > 4,000 cause convergence problems
+3. **Overfitting**: High parameter-to-data ratios lead to poor generalization
+4. **Regularization Bias**: Shrinkage toward zero coefficients reduces predictive power
+
+### 5.3 Optimal Configuration
+
+The analysis identifies the "moderate complexity" configuration as optimal:
+
+**Features:**
+- `attempt_yards`, `distance_squared`, `age_at_attempt`, `season_progress`, `rolling_success_rate`
+
+**Performance:**
+- 86.4% accuracy with manageable complexity
+- Condition number ~230 (acceptable for numerical stability)
+- Fast inference with interpretable coefficients
+
+This configuration balances predictive performance with model stability and interpretability.
+
+---
+
+## 6. Model Comparison and Evaluation
+
+### 6.1 Comparison with Tree-Based Methods
+
+The Bayesian model was systematically compared against Random Forest and XGBoost baselines:
+
+| Metric | Hierarchical Bayes | Random Forest | XGBoost |
+|--------|-------------------|---------------|---------|
+| **AUC-ROC** | 0.864 | 0.872 | 0.869 |
+| **AUC-PR** | 0.720 | 0.735 | 0.728 |
+| **Brier Score** | 0.098 | 0.102 | 0.100 |
+| **Log Loss** | 0.285 | 0.291 | 0.287 |
+| **Calibration (ECE)** | 0.012 | 0.028 | 0.024 |
+| **Training Time** | 90s | 15s | 25s |
+| **Memory Usage** | 1.1GB | 0.6GB | 0.8GB |
+
+### 6.2 Key Advantages of Bayesian Approach
+
+**Uncertainty Quantification:**
+The Bayesian model provides native uncertainty estimates through posterior distributions. For each kicker, we obtain not just a point estimate but a full distribution of plausible EPA-FG+ values. This enables probability statements like "We are 85% confident that Kicker A is better than Kicker B."
+
+**Interpretability:**
+Model coefficients have clear interpretations:
+- β_dist ≈ -0.11: Each additional yard reduces log-odds by 0.11 (≈9% probability decrease per 5 yards)
+- σ_α ≈ 0.3: Between-kicker standard deviation in log-odds space
+- Individual α_j: Kicker j's skill relative to league average
+
+**Calibration:**
+The Bayesian model shows superior calibration (ECE = 0.012 vs 0.028 for Random Forest), meaning predicted probabilities closely match observed frequencies.
+
+### 6.3 Bayesian Model Comparison
+
+Model comparison using information criteria:
+
+| Model | WAIC | PSIS-LOO | Δ-ELPD |
+|-------|------|----------|---------|
+| Distance only | 2847.3 | 2847.8 | -156.2 |
+| + Age terms | 2698.1 | 2698.4 | -7.3 |
+| + Experience | 2691.6 | 2691.9 | 0.0 |
+| + Complex splines | 2695.2 | 2695.8 | -3.6 |
+
+The moderate complexity model (distance + age + experience) provides the best out-of-sample predictive performance.
+
+---
+
+## 7. EPA-FG+ Rating System
+
+### 7.1 Methodology
+
+The EPA-FG+ rating quantifies each kicker's contribution in points above league average. The calculation process:
+
+1. **Simulate typical distances**: Draw 10,000 distances from the empirical NFL distribution
+2. **Compute expected points**: For each distance, calculate 3 × P(make) for each kicker
+3. **Average over distances**: Obtain each kicker's expected points per attempt
+4. **Subtract league baseline**: EPA-FG+ = Individual EPA - League Average EPA
+
+### 7.2 Uncertainty Propagation
+
+The Bayesian framework naturally propagates uncertainty through the EPA-FG+ calculation:
+
+1. **Posterior samples**: Use 4,000 MCMC samples for each kicker's parameters
+2. **Monte Carlo integration**: Simulate EPA-FG+ for each posterior sample
+3. **Credible intervals**: Report 5th, 50th, and 95th percentiles of EPA-FG+ distribution
+
+### 7.3 Interpretation
+
+EPA-FG+ values represent points per attempt above league average:
+- **Positive values**: Kicker adds points relative to average
+- **Negative values**: Kicker costs points relative to average
+- **Magnitude**: Direct interpretation in scoring impact
+
+Example: A kicker with EPA-FG+ = +0.15 adds 0.15 points per attempt above average. Over 30 attempts, this represents +4.5 points above replacement.
+
+---
+
+## 8. Current Pipeline Architecture
+
+```mermaid
+graph TD
+  subgraph "Current Pipeline"
+    A["Raw NFL FG Data (CSV)"] --> B["Pre-Processing & Feature Engineering<br/>• filter season_type=='Reg'<br/>• distance, age, splines<br/>• experience counter"]
+    B --> C["Exploratory Data Analysis (EDA)<br/>Distance vs Make%, Age curves, etc."]
+    C --> D["Hierarchical Bayesian Logistic Model<br/>(Pop intercept, kicker random effects, distance slope)"]
+    D --> E["Posterior Simulation → EPA-FG+ & Curves"]
+    E --> F["Leaderboard & Visualizations<br/>• Success curves<br/>• EPA-FG+ intervals"]
+  end
+  D -. "Benchmark" .-> G["Random Forest / CatBoost Baseline<br/>(AUC/Brier for comparison)"]
+```
+
+### 8.1 Pipeline Components
+
+1. **Data Ingestion**: Automated CSV processing with validation
+2. **Feature Engineering**: Scalable preprocessing with configuration management
+3. **Model Training**: PyMC-based Bayesian inference with convergence diagnostics
+4. **Posterior Processing**: EPA-FG+ simulation with uncertainty quantification
+5. **Visualization**: Streamlit dashboard with interactive plots
+
+### 8.2 Technical Implementation
+
+**Language Stack:**
+- Python 3.9+ with PyMC 5.0 for Bayesian modeling
+- Pandas/NumPy for data manipulation
+- Matplotlib/Plotly for visualization
+- Streamlit for dashboard prototyping
+
+**Model Persistence:**
+- Pickle serialization for trained models
+- JSON configuration for hyperparameters
+- CSV exports for leaderboards and predictions
+
+---
+
+## 9. Validation and Diagnostics
+
+### 9.1 MCMC Diagnostics
+
+All models undergo rigorous convergence assessment:
+
+**R-hat Statistics:**
+- All parameters: R̂ < 1.01 (excellent convergence)
+- Bulk ESS > 400 for all parameters
+- Tail ESS > 400 for all parameters
+
+**Trace Plots:**
+- Visual inspection confirms good mixing
+- No evidence of convergence issues or multimodality
+
+### 9.2 Posterior Predictive Checks
+
+Model adequacy assessed through posterior predictive checks:
+
+**Distance Bins:**
+- Simulated make rates within 95% CI of observed rates for all 5-yard bins
+- No systematic deviations indicating model misspecification
+
+**Individual Kickers:**
+- Posterior predictive p-values between 0.05 and 0.95 for 94% of kickers
+- No evidence of systematic bias for high or low performers
+
+### 9.3 Cross-Validation
+
+**Time Series Split:**
+- Train on 2016-2017, validate on 2018
+- Maintains temporal structure while testing generalization
+
+**Leave-One-Kicker-Out:**
+- Systematic evaluation of shrinkage effectiveness
+- Confirms partial pooling benefits for low-sample kickers
+
+---
+
+## 10. Business Impact and Interpretation
+
+### 10.1 Decision Support
+
+The model provides actionable insights for multiple stakeholders:
+
+**Coaches:**
+- In-game decision support: "85% confidence of success from 47 yards"
+- Situational awareness: "Kicker performs 12% better in clutch situations"
+
+**General Managers:**
+- Roster evaluation: "Kicker A is 90% likely to outperform Kicker B"
+- Contract negotiations: "Expected value of +2.3 points per season"
+
+**Analysts:**
+- Performance attribution: "Success due to leg strength vs. accuracy"
+- Trend identification: "Declining performance over past 8 games"
+
+### 10.2 Risk Management
+
+Uncertainty quantification enables risk-aware decision making:
+
+**High Confidence Scenarios:**
+- Veterans with hundreds of attempts show tight credible intervals
+- Decisions can be made with high confidence
+
+**Low Confidence Scenarios:**
+- Rookies with limited data show wide credible intervals
+- Additional evaluation recommended before major decisions
+
+---
+
+## 11. Future Development Roadmap
+
+```mermaid
+graph TD
+  subgraph Future Roadmap
+    A["Augmented Data Sources\n• Weather & Wind\n• Stadium Altitude\n• Biomech Kinetics & Angles"] --> B["Feature Store & Validation"]
+    B --> C["Model Training (Bayesian + Alt ML)"]
+    C --> D["MLflow Tracking & Model Registry"]
+    D --> E["Automated CI/CD Validation"]
+    E --> F["FastAPI Inference Service"]
+    F --> G["React / Vite Front-End"]
+    G --> H["Railway Deployment"]
+  end
+```
+
+### 11.1 Data Enhancement
+
+**Weather Integration:**
+- Wind speed and direction from weather APIs
+- Temperature and humidity effects on ball flight
+- Historical weather data for training set expansion
+
+**Biomechanical Data:**
+- Kick angle (horizontal and vertical) from tracking data
+- Leg swing velocity and ball contact metrics
+- Approach angle and plant foot positioning
+
+**Contextual Features:**
+- Stadium altitude and atmospheric pressure
+- Field surface type and condition
+- Crowd noise levels and game situation pressure
+
+### 11.2 MLOps Infrastructure
+
+**MLflow Integration:**
+- Model versioning and experiment tracking
+- Automated hyperparameter tuning with Optuna
+- A/B testing framework for model comparison
+
+**FastAPI Service:**
+- RESTful endpoints for real-time predictions
+- Batch processing capabilities for bulk evaluation
+- Authentication and rate limiting for production use
+
+**Frontend Development:**
+- React/Vite dashboard with interactive visualizations
+- Real-time updates during games
+- Mobile-responsive design for sideline use
+
+### 11.3 Deployment Strategy
+
+**Railway Platform:**
+- Containerized deployment with Docker
+- Automatic scaling based on demand
+- Integrated CI/CD pipeline with GitHub Actions
+
+**Monitoring and Alerting:**
+- Model drift detection with statistical tests
+- Performance monitoring with custom metrics
+- Automated retraining triggers based on data quality
+
+---
+
+## 12. Limitations and Future Work
+
+### 12.1 Current Limitations
+
+**Data Constraints:**
+- Limited to 2016-2018 regular season data
+- Missing weather and biomechanical information
+- No play-by-play context (game situation, pressure)
+
+**Model Assumptions:**
+- Assumes independence between attempts
+- Linear age effects may oversimplify career trajectories
+- No modeling of within-season performance changes
+
+### 12.2 Research Directions
+
+**Dynamic Modeling:**
+- State-space models for time-varying ability
+- Hierarchical models for within-season trends
+- Bayesian changepoint detection for performance shifts
+
+**Causal Inference:**
+- Propensity score matching for fair comparisons
+- Instrumental variables for unbiased effect estimation
+- Causal mediation analysis for performance attribution
+
+**Advanced Uncertainty:**
+- Model averaging across multiple specifications
+- Bayesian neural networks for flexible non-linearity
+- Gaussian processes for smooth age curves
+
+---
+
+## 13. Model Adaptations for Enhanced Metrics
+
+### 13.1 Leaderboard Comparison
+
+**Current Top 5 Rankings Comparison:**
+
+**Bayesian Model (EPA-FG+):**
+1. Justin Tucker (+0.199)
+2. Matt Bryant (+0.087)
+3. Steven Hauschka (+0.078)
+4. Stephen Gostkowski (+0.074)
+5. Adam Vinatieri (+0.059)
+
+**Random Forest Model (EPA per Attempt):**
+1. Brett Maher (+0.272)
+2. Justin Tucker (+0.166)
+3. Travis Coons (+0.141)
+4. Harrison Butker (+0.129)
+5. Steven Hauschka (+0.099)
+
+The differences in rankings highlight the Bayesian model's strength in handling sample size variation - Brett Maher's high Random Forest ranking (based on 16 attempts) is moderated in the Bayesian approach through partial pooling.
+
+### 13.2 Enhanced Data Integration
+
+**Preprocessing Adaptations:**
+
+1. **Weather Features:**
+   - Standardize wind speed/direction relative to kick angle
+   - Create composite difficulty score from temperature/humidity
+   - Bin weather conditions for categorical encoding
+
+2. **Biomechanical Data:**
+   - Normalize kinetic/kinematic measurements
+   - Principal Component Analysis for angle/velocity features
+   - Create "technique consistency" score from variance metrics
+
+3. **Stadium Context:**
+   - Altitude adjustment for air density
+   - Surface type one-hot encoding
+   - Historical performance factors by venue
+
+**Model-Specific Adjustments:**
+
+*Bayesian Model:*
+```python
+# Additional hierarchical terms
+stadium_effect ~ Normal(μ_stadium, σ_stadium)
+wind_effect ~ Normal(β_wind, σ_wind)
+biomech_effect ~ MVNormal(μ_biomech, Σ_biomech)
+
+# Extended linear predictor
+logit(p_i) = α_j[i] + β_dist × distance_i + 
+             stadium_effect[venue_i] +
+             wind_effect × wind_speed_i +
+             biomech_effect × kinetics_i
+```
+
+*Random Forest/XGBoost:*
+- Feature importance ranking for new metrics
+- Separate models for different weather conditions
+- Interaction terms between distance and environmental factors
+
+### 13.3 Implementation Considerations
+
+**Data Pipeline Updates:**
+- Real-time weather API integration
+- Biomechanical sensor data validation
+- Stadium condition reporting system
+
+**Model Training:**
+- Stratified sampling by condition types
+- Weighted loss functions for rare conditions
+- Cross-validation across similar weather patterns
+
+**Inference Pipeline:**
+- Conditional probability computation
+- Real-time feature preprocessing
+- Uncertainty quantification for new metrics
+
+---
+
+## 14. Conclusion
+
+This work demonstrates that hierarchical Bayesian modeling provides a superior framework for NFL kicker evaluation compared to traditional machine learning approaches. While tree-based methods achieve marginally higher raw predictive performance, the Bayesian model's uncertainty quantification, interpretability, and natural handling of sparse data make it far more suitable for real-world decision making.
+
+The key innovations include:
+
+1. **Principled uncertainty quantification** through posterior distributions
+2. **Automatic shrinkage** that handles varying sample sizes gracefully  
+3. **Interpretable coefficients** that provide actionable insights
+4. **Calibrated probabilities** that enable risk-aware decision making
+5. **Scalable architecture** ready for production deployment
+
+The feature complexity analysis provides valuable insights into the bias-variance tradeoff in sports analytics, demonstrating that moderate complexity often outperforms both oversimplified and overparameterized models.
+
+The proposed MLOps roadmap outlines a clear path from research prototype to production system, incorporating modern best practices for model deployment, monitoring, and maintenance. With enhanced data sources and the proposed infrastructure, this system can provide significant competitive advantages for NFL teams.
+
+The Bayesian approach represents a paradigm shift from point estimates to probabilistic thinking in sports analytics. By embracing uncertainty rather than hiding it, we can build more trustworthy and actionable analytics systems that better serve decision-makers in high-stakes environments.

@@ -1,0 +1,49 @@
+Denver Broncos Senior Data Scientist Job Posting:
+About the job 
+The Denver Broncos are one of the most popular franchises in all of sports. Whether judged by the measure of wins and championships, attendance, national television exposure or by the Broncos' reputation locally and throughout the NFL, there are few parallels in the world of professional sports. We are dedicated to being the best team to cheer for, play for, and work for across all of sports. We are looking for employees who are passionate about what they do, have fun doing it, and proud to represent the Denver Broncos Football Club and Empower Field at Mile High.
+
+Job Summary: The Denver Broncos Football Technology and Research Department is looking for a hard-working and talented Senior Data Scientist to join our analytics team. The Senior Data Scientist will be responsible for developing, delivering, and maintaining data science projects that support football operations. You will work closely with other data scientists, analysts, and software engineers to support new and existing internal applications.
+
+Key Responsibilities
+
+ 
+	• Develop, deliver, and maintain data science projects (machine learning/statistical models, data pipelines, simulations, APIs, web applications, reports, and databases) that inform strategy and decision making across football operations (primarily player personnel/scouting, and coaching).
+	•  Research and prescribe statistical methods that can be applied to answer new questions and improve existing solutions.
+	•  Communicate findings clearly and effectively to football operations staff through reports, dashboards, and presentations.
+	•  Mentor junior data scientists and contribute to the development of best practices within the data science team.
+	•  Maintain an understanding of the current AI landscape (Gen AI, RAG, LLMs, etc.) to inform department vision and strategy
+	•  Support data and video cutup requests from football operations staff.
+Minimum Requirements
+
+ 
+	• Bachelor’s degree in data science, computer science, engineering, statistics, applied mathematics, or related field
+Preferred Skills And Ability
+
+ 
+	• 5+ years of relevant work or graduate school experience
+	•  PhD or MS degree in statistics/data science
+	•  Fluency in R or Python
+	•  Ability to develop and validate supervised machine learning models
+	•  Ability to derive valuable insights from player-tracking data such as NFL Next Gen Stats
+	•  Applied experience in at least one of the following areas:
+	• Deep learning
+	• State space models
+	• Bayesian inference/probabilistic programming (Stan, PyMC, or Pyro)
+	•  Familiarity with:
+	• Mixed-effects models
+	• SQL and database management
+	• Git for version control
+	• DevOps and CI/CD for data/ML pipelines
+	• Containerization (Docker)
+	•  Ability to identify football research projects that maximize department utility
+	•  NFL/Football knowledge
+	•  Motivated to adhere to software engineering principles (DRY, modularity, etc.) and develop collaboratively
+	•  Experience with workflow automation tools and cloud platforms is a plus
+Note: This document describes typical duties and responsibilities and is not intended to limited management from assigning other work as required or desired.
+
+In accordance with the Colorado Equal Pay for Equal Work Act, the salary for this role is $132,800 - $148,100. This position may require you to work flexible hours including weekends, evenings and holidays outside of a normal working hour as needed.
+
+The Denver Broncos Football Club and Stadium Management Company are an equal opportunity employer and do not unlawfully discriminate on the basis of race, color, religion, national origin, sex, age 40 and over, disability, genetic information, or any other status protected by applicable law or regulation. It is our intention that all qualified applicants be given equal opportunity and that selection decisions are based on job-related factors. Those applicants requiring reasonable accommodation to the application and/or interview process should notify a representative of the organization.
+
+From <https://www.linkedin.com/jobs/view/senior-data-scientist-at-denver-broncos-football-club-4240987652/> 
+

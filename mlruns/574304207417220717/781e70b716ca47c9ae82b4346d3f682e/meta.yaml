@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/781e70b716ca47c9ae82b4346d3f682e/artifacts
+end_time: 1751854588255
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: 781e70b716ca47c9ae82b4346d3f682e
+run_name: awesome-mole-937
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751854584090
+status: 3
+tags: []
+user_id: root

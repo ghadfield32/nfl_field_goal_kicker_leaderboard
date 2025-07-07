@@ -1,0 +1,23 @@
+Upgrade path once you do have play-by-play
+
+    Merge nflfastR’s calculate_win_probability() output (one CSV per week).
+    optimumsportsperformance.com
+
+    Replace the manual weights with importance = abs(WPA); this auto-scales and subsumes the playoff multiplier.
+
+    Swap binary is_clutch for a continuous LI feature; keep the beta–binomial shrink unchanged.
+
+
+
+
+other metrics to add:
+Optionally publish an “FG%-over-expected” (OE) column – same simulation but leave the 3-point multiplier off; some analysts (e.g., The 33rd Team) prefer OE to EPA
+the33rdteam.com
+
+clutch indicator:
+go more in depth with clutch indicator into last sec
+close game indicator to go along with clutch fg'same
+
+kick_angle_horizontal_degrees
+
+

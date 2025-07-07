@@ -1,0 +1,14 @@
+artifact_uri: file:///workspace/mlruns/574304207417220717/db4d8f62c68e49598852b6a46ed989be/artifacts
+end_time: 1751841128805
+entry_point_name: ''
+experiment_id: '574304207417220717'
+lifecycle_stage: active
+run_id: db4d8f62c68e49598852b6a46ed989be
+run_name: chill-bass-969
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1751841125159
+status: 3
+tags: []
+user_id: root

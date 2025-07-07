@@ -1,0 +1,10 @@
+artifact_location: file:///workspace/mlruns/574304207417220717/models/m-df7a3a4811ae461aac0ef910cedc0a34/artifacts
+creation_timestamp: 1751841117347
+experiment_id: '574304207417220717'
+last_updated_timestamp: 1751841119375
+model_id: m-df7a3a4811ae461aac0ef910cedc0a34
+model_type: null
+name: simple_logistic
+source_run_id: 176a2086fe9b42719145f198a2e98b7a
+status: 2
+status_message: null

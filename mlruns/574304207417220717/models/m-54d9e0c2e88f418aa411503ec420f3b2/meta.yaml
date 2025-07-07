@@ -1,0 +1,10 @@
+artifact_location: file:///workspace/mlruns/574304207417220717/models/m-54d9e0c2e88f418aa411503ec420f3b2/artifacts
+creation_timestamp: 1751841120651
+experiment_id: '574304207417220717'
+last_updated_timestamp: 1751841124280
+model_id: m-54d9e0c2e88f418aa411503ec420f3b2
+model_type: null
+name: ridge_logistic
+source_run_id: cc143822c81f4721984eb67c1d9c860f
+status: 2
+status_message: null
