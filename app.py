@@ -7,7 +7,7 @@ import base64
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from typing import Optional, cast
+from typing import Optional, cast, List
 import os
 
 # Try to import optional dependencies
@@ -417,29 +417,145 @@ def get_bayesian_metrics(suite_dir: Path, df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index().rename(columns={"index":"Metric"})
     return dfm
 
-# ── Automatic setup for Streamlit Cloud ──
+# === Enhanced setup for cloud deployment ===
 def setup_for_cloud():
-    """Automatically copy leaderboard files for Streamlit Cloud compatibility."""
+    """Automatically copy leaderboard files and setup paths for Streamlit Cloud compatibility."""
     try:
-        # Only run this in cloud environments or if leaderboards are missing
         project_root = Path(__file__).parent.absolute()
         source_dir = project_root / "output"
         
-        # Check if we need to copy files
-        missing_leaderboards = []
-        for model_name in ["catboost", "random_forest", "ridge_logistic", "simple_logistic", "xgboost"]:
-            if not (project_root / f"{model_name}_leaderboard.csv").exists():
-                missing_leaderboards.append(model_name)
+        # Check for missing leaderboard files in project root
+        expected_leaderboards = [
+            "catboost_leaderboard.csv", "random_forest_leaderboard.csv", 
+            "ridge_logistic_leaderboard.csv", "simple_logistic_leaderboard.csv",
+            "xgboost_leaderboard.csv"
+        ]
         
-        # If any leaderboards are missing and source exists, copy them
+        missing_leaderboards = [
+            f for f in expected_leaderboards 
+            if not (project_root / f).exists()
+        ]
+        
+        # Check if we need to copy files and copy them if source exists
         if missing_leaderboards and source_dir.exists():
             import shutil
             for csv_file in source_dir.glob("*leaderboard.csv"):
                 target_file = project_root / csv_file.name
                 if not target_file.exists():
                     shutil.copy2(csv_file, target_file)
+                    
+        # Setup Bayesian model files - copy bayesian_features.csv to multiple locations
+        bayesian_features_source = project_root / "output" / "bayesian_features.csv"
+        if bayesian_features_source.exists():
+            # Copy to project root for easy access
+            target_root = project_root / "bayesian_features.csv"
+            if not target_root.exists():
+                import shutil
+                shutil.copy2(bayesian_features_source, target_root)
+                
+            # Copy to data/processed for alternative path
+            data_processed = project_root / "data" / "processed"
+            data_processed.mkdir(parents=True, exist_ok=True)
+            target_processed = data_processed / "bayesian_features.csv"
+            if not target_processed.exists():
+                shutil.copy2(bayesian_features_source, target_processed)
+                
     except Exception:
         pass  # Silently fail if there are any issues
+
+# === Enhanced Bayesian model loading functions ===
+def find_bayesian_data_file() -> Optional[Path]:
+    """Find the bayesian_features.csv file in multiple possible locations."""
+    project_root = Path(__file__).parent.absolute()
+    
+    # List of possible locations for the bayesian features file
+    possible_locations = [
+        # Primary location from config
+        getattr(config, 'MODEL_DATA_FILE', None),
+        # Alternative locations
+        project_root / "output" / "bayesian_features.csv",
+        project_root / "bayesian_features.csv",
+        project_root / "data" / "processed" / "bayesian_features.csv",
+        Path("output/bayesian_features.csv"),
+        Path("bayesian_features.csv"),
+    ]
+    
+    # Filter out None values and check each location
+    for location in possible_locations:
+        if location is not None and Path(location).exists():
+            return Path(location)
+    
+    return None
+
+def find_bayesian_suite_dirs() -> List[Path]:
+    """Find Bayesian suite directories in multiple possible locations."""
+    project_root = Path(__file__).parent.absolute()
+    
+    # List of possible locations for Bayesian suites
+    possible_roots = [
+        # Primary location from config
+        getattr(config, 'MODEL_DIR', None),
+        # Alternative locations
+        project_root / "models" / "bayesian",
+        Path("models/bayesian"),
+        project_root / "bayesian",
+    ]
+    
+    suite_dirs = []
+    for suite_root in possible_roots:
+        if suite_root is not None and Path(suite_root).exists():
+            # Find valid suite directories
+            dirs = sorted(
+                [d for d in Path(suite_root).iterdir()
+                 if d.is_dir() and (d/"meta.json").exists() and (d/"trace.nc").exists()],
+                reverse=True
+            )
+            suite_dirs.extend(dirs)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_dirs = []
+    for d in suite_dirs:
+        if d not in seen:
+            seen.add(d)
+            unique_dirs.append(d)
+    
+    return unique_dirs
+
+def load_bayesian_data_with_fallback() -> Optional[pd.DataFrame]:
+    """Load Bayesian features data with comprehensive fallback options."""
+    # Try to find the data file
+    data_file = find_bayesian_data_file()
+    
+    if data_file is not None:
+        try:
+            df = pd.read_csv(data_file)
+            st.sidebar.success(f"✅ Loaded Bayesian data from {data_file.name}")
+            return df
+        except Exception as e:
+            st.sidebar.error(f"❌ Error loading {data_file}: {e}")
+    
+    # Fallback: Try to generate data from raw sources
+    if DATA_LOADER_AVAILABLE and DATA_PREPROCESSOR_AVAILABLE:
+        try:
+            st.sidebar.warning("⚠️ Generating Bayesian features from raw data...")
+            
+            # Load and process data
+            loader = DataLoader()
+            df_raw = loader.load_complete_dataset()
+            
+            # Create minimal preprocessor for Bayesian models
+            from src.nfl_kicker_analysis.data.feature_engineering import FeatureEngineer
+            engineer = FeatureEngineer()
+            df_feat = engineer.create_all_features(df_raw)
+            
+            st.sidebar.success("✅ Generated Bayesian features on-the-fly")
+            return df_feat
+            
+        except Exception as e:
+            st.sidebar.error(f"❌ Error generating features: {e}")
+    
+    return None
 
 # Run setup
 setup_for_cloud()
@@ -684,20 +800,8 @@ if model_type == "Point Estimate Models":
 else:
     st.sidebar.subheader("🔬 Uncertainty Interval Models")
     
-    # Safely get the model directory
-    if hasattr(config, 'MODEL_DIR'):
-        suite_root = Path(config.MODEL_DIR)
-    else:
-        suite_root = Path("models/bayesian")  # Fallback
-    
-    if suite_root.exists():
-        suite_dirs = sorted(
-            [d for d in suite_root.iterdir()
-             if d.is_dir() and (d/"meta.json").exists() and (d/"trace.nc").exists()],
-            reverse=True
-        )
-    else:
-        suite_dirs = []
+    # Find Bayesian suite directories with enhanced search
+    suite_dirs = find_bayesian_suite_dirs()
 
     # If there are no saved suites at all, show fallback content
     if not suite_dirs:
@@ -713,108 +817,59 @@ else:
         
         with eda_tab:
             st.header("📊 Exploratory Data Analysis & Diagnostics")
-            if not EDA_AVAILABLE:
-                st.warning("EDA modules not available. Showing basic data information.")
+            
+            # Load preprocessed data for EDA
+            df = load_preprocessed_data()
+            if not df.empty and EDA_AVAILABLE:
                 try:
-                    data = load_preprocessed_data()
-                    if not data.empty:
-                        st.write("Data Shape:", data.shape)
-                        st.write("Data Info:")
-                        st.dataframe(data.head())
-                        if 'success' in data.columns:
-                            success_rate = data['success'].mean()
-                            st.metric("Overall Success Rate", f"{success_rate:.3f}")
+                    # Display EDA plots
+                    st.subheader("📈 Distance vs Success Analysis")
+                    fig1, ax1 = plt.subplots(figsize=(10, 6))
+                    distance_analysis(df, savefig=None)
+                    st.pyplot(fig1)
+                    
+                    st.subheader("⏰ Temporal Analysis")
+                    fig2, ax2 = plt.subplots(figsize=(12, 8))
+                    temporal_analysis(df, savefig=None)
+                    st.pyplot(fig2)
+                    
+                    st.subheader("🎯 Kicker Performance Analysis")
+                    fig3, ax3 = plt.subplots(figsize=(15, 12))
+                    kicker_performance_analysis(df, savefig=None)
+                    st.pyplot(fig3)
+                    
                 except Exception as e:
-                    st.error(f"Error loading basic data: {str(e)}")
+                    st.error(f"Error generating EDA plots: {str(e)}")
             else:
-                try:
-                    data = load_preprocessed_data()
-                    if data.empty:
-                        st.warning("No data available for analysis")
-                        st.stop()
-
-                    st.subheader("Overall Outcome Distribution")
-                    _, fig_out = outcome_summary(data)
-                    st.pyplot(fig_out)
-
-                    st.subheader("Success Rate vs Distance")
-                    _, fig_dist = distance_analysis(data)
-                    st.pyplot(fig_dist)
-
-                    st.subheader("Temporal Trends & Age")
-                    _, fig_temp = temporal_analysis(data)
-                    st.pyplot(fig_temp)
-
-                    st.subheader("Kicker Performance Dashboard")
-                    _, fig_kick = kicker_performance_analysis(data)
-                    st.pyplot(fig_kick)
-
-                    st.subheader("Feature Correlation Matrix")
-                    fig_corr = feature_engineering(data)
-                    st.pyplot(fig_corr)
-
-                    st.markdown("---")
-                    st.caption(
-                        "Plots generated on-the-fly using reusable utilities from the core package."
-                    )
-                except Exception as e:
-                    st.error(f"Error loading EDA data: {str(e)}")
-                    st.info("Please ensure the data files are available in the data directory.")
+                st.warning("EDA data not available")
         
-            with paper_tab:
-                st.header("📄 Technical Paper")
-                try:
-                    with open("data/paper_details/FINAL_PAPER.txt", "r") as f:
+        with paper_tab:
+            st.header("📄 Technical Paper")
+            try:
+                # Load and display technical paper content
+                paper_file = Path("data/paper_details/FINAL_PAPER.txt")
+                if paper_file.exists():
+                    with open(paper_file, 'r', encoding='utf-8') as f:
                         paper_content = f.read()
-                    
-                    # Split content at mermaid sections
-                    sections = paper_content.split("```mermaid")
-                    
-                    # Display first part
-                    st.markdown(sections[0])
-                    
-                    # Handle each mermaid diagram
-                    for i, section in enumerate(sections[1:], 1):
-                        # Split at the end of the mermaid block
-                        mermaid_and_rest = section.split("```", 2)
-                        if len(mermaid_and_rest) >= 2:
-                            # Extract mermaid content
-                            mermaid_content = mermaid_and_rest[0].strip()
-                            st.write("")
-                            
-                            # Display mermaid diagram as code block
-                            st.code(mermaid_content, language="mermaid")
-                            
-                            st.write("") 
-                            
-                            # Display the rest of the content
-                            if len(mermaid_and_rest) > 1:
-                                st.markdown(mermaid_and_rest[1])
-                    
-                    # Add citation information
-                    st.markdown("---")
-                    st.caption("© 2025 Geoffrey Hadfield. All rights reserved.")
-                    
-                except FileNotFoundError:
-                    st.error(
-                        "Technical paper file not found. Please ensure "
-                        "`data/paper_details/FINAL_PAPER.txt` exists."
-                    )
-                except Exception as e:
-                    st.error(f"Error loading technical paper: {str(e)}")
+                    st.markdown(paper_content)
+                else:
+                    st.warning("Technical paper not found")
+            except Exception as e:
+                st.error(f"Error loading technical paper: {str(e)}")
+        
+        # Exit early - don't try to load Bayesian models
+        st.stop()
+    
     else:
         selected = st.sidebar.selectbox("Choose Bayesian suite", [d.name for d in suite_dirs])
-        suite_path = suite_root / selected
+        suite_path = suite_dirs[[d.name for d in suite_dirs].index(selected)]
 
-        # Try to load engineered features file
-        if hasattr(config, 'MODEL_DATA_FILE'):
-            data_file = config.MODEL_DATA_FILE
-        else:
-            data_file = Path("output/bayesian_features.csv")  # Fallback
-            
-        if not data_file.exists():
+        # Try to load Bayesian features data with enhanced fallback
+        df = load_bayesian_data_with_fallback()
+        
+        if df is None:
             st.sidebar.warning(
-                f"Missing features file:\n  {data_file}\n\n"
+                "Missing Bayesian features data.\n\n"
                 "Showing EDA and Technical Paper sections only."
             )
             # Show EDA and Technical Paper even without Bayesian models
@@ -822,104 +877,46 @@ else:
             
             with eda_tab:
                 st.header("📊 Exploratory Data Analysis & Diagnostics")
-                if not EDA_AVAILABLE:
-                    st.warning("EDA modules not available. Showing basic data information.")
-                    try:
-                        data = load_preprocessed_data()
-                        if not data.empty:
-                            st.write("Data Shape:", data.shape)
-                            st.write("Data Info:")
-                            st.dataframe(data.head())
-                            if 'success' in data.columns:
-                                success_rate = data['success'].mean()
-                                st.metric("Overall Success Rate", f"{success_rate:.3f}")
-                    except Exception as e:
-                        st.error(f"Error loading basic data: {str(e)}")
-                else:
-                    try:
-                        data = load_preprocessed_data()
-                        if data.empty:
-                            st.warning("No data available for analysis")
-                            st.stop()
-
-                        st.subheader("Overall Outcome Distribution")
-                        _, fig_out = outcome_summary(data)
-                        st.pyplot(fig_out)
-
-                        st.subheader("Success Rate vs Distance")
-                        _, fig_dist = distance_analysis(data)
-                        st.pyplot(fig_dist)
-
-                        st.subheader("Temporal Trends & Age")
-                        _, fig_temp = temporal_analysis(data)
-                        st.pyplot(fig_temp)
-
-                        st.subheader("Kicker Performance Dashboard")
-                        _, fig_kick = kicker_performance_analysis(data)
-                        st.pyplot(fig_kick)
-
-                        st.subheader("Feature Correlation Matrix")
-                        fig_corr = feature_engineering(data)
-                        st.pyplot(fig_corr)
-
-                        st.markdown("---")
-                        st.caption(
-                            "Plots generated on-the-fly using reusable utilities from the core package."
-                        )
-                    except Exception as e:
-                        st.error(f"Error loading EDA data: {str(e)}")
-                        st.info("Please ensure the data files are available in the data directory.")
                 
-                with paper_tab:
-                    st.header("📄 Technical Paper")
+                # Load basic data for EDA
+                df_basic = load_preprocessed_data()
+                if not df_basic.empty and EDA_AVAILABLE:
                     try:
-                        with open("data/paper_details/FINAL_PAPER.txt", "r") as f:
-                            paper_content = f.read()
+                        # Display EDA plots with basic data
+                        st.subheader("📈 Distance vs Success Analysis")
+                        fig1, ax1 = plt.subplots(figsize=(10, 6))
+                        distance_analysis(df_basic, savefig=None)
+                        st.pyplot(fig1)
                         
-                        # Split content at mermaid sections
-                        sections = paper_content.split("```mermaid")
+                        st.subheader("⏰ Temporal Analysis")
+                        fig2, ax2 = plt.subplots(figsize=(12, 8))
+                        temporal_analysis(df_basic, savefig=None)
+                        st.pyplot(fig2)
                         
-                        # Display first part
-                        st.markdown(sections[0])
-                        
-                        # Handle each mermaid diagram
-                        for i, section in enumerate(sections[1:], 1):
-                            # Split at the end of the mermaid block
-                            mermaid_and_rest = section.split("```", 2)
-                            if len(mermaid_and_rest) >= 2:
-                                # Extract mermaid content
-                                mermaid_content = mermaid_and_rest[0].strip()
-                                st.write("")
-                                
-                                # Display mermaid diagram as code block
-                                st.code(mermaid_content, language="mermaid")
-                                
-                                st.write("") 
-                                
-                                # Display the rest of the content
-                                if len(mermaid_and_rest) > 1:
-                                    st.markdown(mermaid_and_rest[1])
-                        
-                        # Add citation information
-                        st.markdown("---")
-                        st.caption("© 2025 Geoffrey Hadfield. All rights reserved.")
-                        
-                    except FileNotFoundError:
-                        st.error(
-                            "Technical paper file not found. Please ensure "
-                            "`data/paper_details/FINAL_PAPER.txt` exists."
-                        )
                     except Exception as e:
-                        st.error(f"Error loading technical paper: {str(e)}")
+                        st.error(f"Error generating EDA plots: {str(e)}")
+                else:
+                    st.warning("EDA data not available")
+            
+            with paper_tab:
+                st.header("📄 Technical Paper")
+                try:
+                    paper_file = Path("data/paper_details/FINAL_PAPER.txt")
+                    if paper_file.exists():
+                        with open(paper_file, 'r', encoding='utf-8') as f:
+                            paper_content = f.read()
+                        st.markdown(paper_content)
+                    else:
+                        st.warning("Technical paper not found")
+                except Exception as e:
+                    st.error(f"Error loading technical paper: {str(e)}")
             
             # Exit early - don't try to load Bayesian models
             st.stop()
 
-        df = pd.read_csv(data_file)
-
         # Render metrics & leaderboard, catching errors
         try:
-            # Load the suite first
+            # Load the suite first with enhanced error handling
             suite = BayesianModelSuite.load_suite(suite_path)
             
             # Create tabs: EPA Leaderboard, Kicker Analysis, EDA, and Model Metrics
@@ -933,181 +930,194 @@ else:
             # Tab 1: EPA-FG⁺ Leaderboard
             with lb_tab:
                 st.header("🔬 Bayesian EPA-FG⁺ Leaderboard with 95% CI")
-                df_ci = (
-                    suite.epa_fg_plus(df,
-                                    n_samples=config.BAYESIAN_MCMC_SAMPLES,
-                                    return_ci=True)
-                         .reset_index()
-                         .sort_values("epa_fg_plus_mean", ascending=False)
-                )
-                st.dataframe(df_ci)
+                
+                try:
+                    # Generate EPA leaderboard with error handling
+                    with st.spinner("Generating EPA leaderboard..."):
+                        df_ci = (
+                            suite.epa_fg_plus(df,
+                                            n_samples=config.BAYESIAN_MCMC_SAMPLES,
+                                            return_ci=True)
+                                 .reset_index()
+                                 .sort_values("epa_fg_plus_mean", ascending=False)
+                        )
+                    st.dataframe(df_ci)
+                    
+                    # Add download button for the leaderboard
+                    csv = df_ci.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download EPA Leaderboard as CSV",
+                        data=csv,
+                        file_name=f"bayesian_epa_leaderboard_{selected}.csv",
+                        mime="text/csv"
+                    )
+                    
+                except Exception as e:
+                    st.error(f"❌ Error generating EPA leaderboard: {e}")
+                    st.info("This may be due to missing dependencies or data incompatibility.")
+                    
+                    # Show debug information
+                    with st.expander("🔧 Debug Information"):
+                        st.write("**Suite Information:**")
+                        st.write(f"- Suite path: {suite_path}")
+                        st.write(f"- Data shape: {df.shape}")
+                        st.write(f"- Data columns: {list(df.columns)}")
+                        
+                        # Show traceback
+                        import traceback
+                        st.code(traceback.format_exc())
 
             # Tab 2: Kicker Analysis
             with kicker_tab:
-                st.header("🎯 Individual Kicker Analysis")
-                # Add kicker selection
-                kicker_list = df["player_name"].unique().tolist()
-                selected_kicker = st.selectbox("Select a Kicker", sorted(kicker_list))
-
-                if selected_kicker:
-                    try:
-                        # Get and display interval
-                        interval = suite.kicker_interval_by_name(df, selected_kicker)
-                        st.markdown(
-                            f"**P(make)**: {interval['mean']:.3f} "
-                            f"(95% CI: {interval['lower']:.3f} – {interval['upper']:.3f})"
-                        )
+                st.header("⛹️‍♂️ Individual Kicker Analysis")
+                
+                try:
+                    # Get unique kickers for selection
+                    if 'player_name' in df.columns:
+                        kickers = sorted(df['player_name'].unique())
+                        selected_kicker = st.selectbox("Choose a kicker", kickers)
                         
-                        # Create two columns for the plots
-                        col1, col2 = st.columns(2)
+                        if selected_kicker:
+                            # Show kicker statistics
+                            kicker_data = df[df['player_name'] == selected_kicker]
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total Attempts", len(kicker_data))
+                            with col2:
+                                success_rate = kicker_data['success'].mean()
+                                st.metric("Success Rate", f"{success_rate:.1%}")
+                            with col3:
+                                avg_distance = kicker_data['attempt_yards'].mean()
+                                st.metric("Avg Distance", f"{avg_distance:.1f} yds")
+                            
+                            # Generate posterior plot if possible
+                            if BAYESIAN_AVAILABLE and ARVIZ_AVAILABLE:
+                                try:
+                                    with st.spinner("Generating skill posterior..."):
+                                        fig = plot_kicker_skill_posterior(suite, df, selected_kicker)
+                                        st.pyplot(fig)
+                                except Exception as e:
+                                    st.warning(f"Could not generate posterior plot: {e}")
+                            
+                            # Show kicker's recent attempts
+                            st.subheader("Recent Attempts")
+                            recent_attempts = kicker_data.sort_values('game_date', ascending=False).head(10)
+                            st.dataframe(recent_attempts[['game_date', 'attempt_yards', 'success', 'field_goal_result']])
+                    
+                    else:
+                        st.warning("Player names not available in the dataset")
                         
-                        with col1:
-                            st.markdown("**Make Probability Distribution**")
-                            fig_skill = plot_kicker_skill_posterior(suite, df, selected_kicker)
-                            st.pyplot(fig_skill)
-                            
-                        with col2:
-                            st.markdown("**EPA-FG⁺ Distribution**")
-                            fig_epa = plot_kicker_epa_distribution(suite, df, selected_kicker)
-                            st.pyplot(fig_epa)
-                            
-                    except Exception as e:
-                        st.error(f"Error analyzing kicker: {str(e)}")
+                except Exception as e:
+                    st.error(f"❌ Error in kicker analysis: {e}")
 
-            # Tab 3: EDA & Analytics
+            # Tab 3: EDA & Analytics (same as before)
             with eda_tab:
                 st.header("📊 Exploratory Data Analysis & Diagnostics")
-                data = load_preprocessed_data()
-
-                st.subheader("Overall Outcome Distribution")
-                _, fig_out = outcome_summary(data)
-                st.pyplot(fig_out)
-
-                st.subheader("Success Rate vs Distance")
-                _, fig_dist = distance_analysis(data)
-                st.pyplot(fig_dist)
-
-                st.subheader("Temporal Trends & Age")
-                _, fig_temp = temporal_analysis(data)
-                st.pyplot(fig_temp)
-
-                st.subheader("Kicker Performance Dashboard")
-                _, fig_kick = kicker_performance_analysis(data)
-                st.pyplot(fig_kick)
-
-                st.subheader("Feature Correlation Matrix")
-                fig_corr = feature_engineering(data)
-                st.pyplot(fig_corr)
-
-                st.markdown("---")
-                st.caption(
-                    "Plots generated on-the-fly using reusable utilities from the core package."
-                )
+                
+                if EDA_AVAILABLE:
+                    try:
+                        # Display EDA plots
+                        st.subheader("📈 Distance vs Success Analysis")
+                        fig1, ax1 = plt.subplots(figsize=(10, 6))
+                        distance_analysis(df, savefig=None)
+                        st.pyplot(fig1)
+                        
+                        st.subheader("⏰ Temporal Analysis")
+                        fig2, ax2 = plt.subplots(figsize=(12, 8))
+                        temporal_analysis(df, savefig=None)
+                        st.pyplot(fig2)
+                        
+                        st.subheader("🎯 Kicker Performance Analysis")
+                        fig3, ax3 = plt.subplots(figsize=(15, 12))
+                        kicker_performance_analysis(df, savefig=None)
+                        st.pyplot(fig3)
+                        
+                        st.subheader("🔗 Feature Correlations")
+                        fig4, ax4 = plt.subplots(figsize=(8, 6))
+                        feature_engineering(df, savefig=None)
+                        st.pyplot(fig4)
+                        
+                    except Exception as e:
+                        st.error(f"Error generating EDA plots: {str(e)}")
+                else:
+                    st.warning("EDA modules not available")
 
             # Tab 4: Model Metrics
             with metrics_tab:
-                st.header("Bayesian Model Evaluation Metrics")
-                df_metrics = get_bayesian_metrics(suite_path, df)
-                st.table(df_metrics)
+                st.header("📈 Model Performance Metrics")
+                
+                try:
+                    # Load or compute metrics
+                    dfm = get_bayesian_metrics(suite_path, df)
+                    
+                    if not dfm.empty:
+                        st.dataframe(dfm)
+                        
+                        # Show key metrics prominently
+                        if len(dfm) > 0:
+                            st.subheader("🎯 Key Performance Indicators")
+                            
+                            # Create columns for key metrics
+                            metrics_cols = st.columns(3)
+                            
+                            for i, (_, row) in enumerate(dfm.head(3).iterrows()):
+                                with metrics_cols[i % 3]:
+                                    st.metric(
+                                        label=row['Metric'].replace('_', ' ').title(),
+                                        value=f"{row['Value']:.4f}"
+                                    )
+                    else:
+                        st.warning("No metrics available")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error loading metrics: {e}")
+                    
+                    # Show debug information
+                    with st.expander("🔧 Debug Information"):
+                        st.write("**Metrics Loading Debug:**")
+                        st.write(f"- Suite path: {suite_path}")
+                        st.write(f"- Metrics file exists: {(suite_path / 'metrics.json').exists()}")
+                        
+                        import traceback
+                        st.code(traceback.format_exc())
 
         except Exception as e:
-            st.sidebar.error(f"Failed to load suite or compute metrics: {e}")
-            st.sidebar.info("📊 Showing EDA and Technical Paper sections only")
+            st.error(f"❌ Error loading Bayesian suite: {e}")
             
-            # Show EDA and Technical Paper as fallback
-            eda_tab, paper_tab = st.tabs(["📊 EDA & Analytics", "📄 Technical Paper"])
+            # Show comprehensive debug information
+            st.subheader("🔧 Debug Information")
             
-            with eda_tab:
-                st.header("📊 Exploratory Data Analysis & Diagnostics")
-                if not EDA_AVAILABLE:
-                    st.warning("EDA modules not available. Showing basic data information.")
-                    try:
-                        data = load_preprocessed_data()
-                        if not data.empty:
-                            st.write("Data Shape:", data.shape)
-                            st.write("Data Info:")
-                            st.dataframe(data.head())
-                            if 'success' in data.columns:
-                                success_rate = data['success'].mean()
-                                st.metric("Overall Success Rate", f"{success_rate:.3f}")
-                    except Exception as e:
-                        st.error(f"Error loading basic data: {str(e)}")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("**Suite Directory Structure:**")
+                try:
+                    if suite_path.exists():
+                        files = list(suite_path.iterdir())
+                        for file in files:
+                            st.write(f"- {file.name} ({'dir' if file.is_dir() else 'file'})")
+                    else:
+                        st.write("Suite path does not exist")
+                except Exception as debug_e:
+                    st.write(f"Error listing files: {debug_e}")
+            
+            with col2:
+                st.write("**Bayesian Data Search Paths:**")
+                data_file = find_bayesian_data_file()
+                if data_file:
+                    st.write(f"✅ Found: {data_file}")
                 else:
-                    try:
-                        data = load_preprocessed_data()
-                        if data.empty:
-                            st.warning("No data available for analysis")
-                            st.stop()
-
-                        st.subheader("Overall Outcome Distribution")
-                        _, fig_out = outcome_summary(data)
-                        st.pyplot(fig_out)
-
-                        st.subheader("Success Rate vs Distance")
-                        _, fig_dist = distance_analysis(data)
-                        st.pyplot(fig_dist)
-
-                        st.subheader("Temporal Trends & Age")
-                        _, fig_temp = temporal_analysis(data)
-                        st.pyplot(fig_temp)
-
-                        st.subheader("Kicker Performance Dashboard")
-                        _, fig_kick = kicker_performance_analysis(data)
-                        st.pyplot(fig_kick)
-
-                        st.subheader("Feature Correlation Matrix")
-                        fig_corr = feature_engineering(data)
-                        st.pyplot(fig_corr)
-
-                        st.markdown("---")
-                        st.caption(
-                            "Plots generated on-the-fly using reusable utilities from the core package."
-                        )
-                    except Exception as e:
-                        st.error(f"Error loading EDA data: {str(e)}")
-                        st.info("Please ensure the data files are available in the data directory.")
-                
-                with paper_tab:
-                    st.header("📄 Technical Paper")
-                    try:
-                        with open("data/paper_details/FINAL_PAPER.txt", "r") as f:
-                            paper_content = f.read()
-                        
-                        # Split content at mermaid sections
-                        sections = paper_content.split("```mermaid")
-                        
-                        # Display first part
-                        st.markdown(sections[0])
-                        
-                        # Handle each mermaid diagram
-                        for i, section in enumerate(sections[1:], 1):
-                            # Split at the end of the mermaid block
-                            mermaid_and_rest = section.split("```", 2)
-                            if len(mermaid_and_rest) >= 2:
-                                # Extract mermaid content
-                                mermaid_content = mermaid_and_rest[0].strip()
-                                st.write("")
-                                
-                                # Display mermaid diagram as code block
-                                st.code(mermaid_content, language="mermaid")
-                                
-                                st.write("") 
-                                
-                                # Display the rest of the content
-                                if len(mermaid_and_rest) > 1:
-                                    st.markdown(mermaid_and_rest[1])
-                        
-                        # Add citation information
-                        st.markdown("---")
-                        st.caption("© 2025 Geoffrey Hadfield. All rights reserved.")
-                        
-                    except FileNotFoundError:
-                        st.error(
-                            "Technical paper file not found. Please ensure "
-                            "`data/paper_details/FINAL_PAPER.txt` exists."
-                        )
-                    except Exception as e:
-                        st.error(f"Error loading technical paper: {str(e)}")
+                    st.write("❌ No data file found")
+                    
+                st.write("**Available Suite Directories:**")
+                for i, suite_dir in enumerate(suite_dirs):
+                    st.write(f"{i+1}. {suite_dir}")
+            
+            # Show full traceback
+            with st.expander("📋 Full Error Traceback"):
+                import traceback
+                st.code(traceback.format_exc())
 
 # Note: Technical Paper section is now handled within the tabs above
 
