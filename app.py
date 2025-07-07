@@ -78,16 +78,31 @@ try:
 except ImportError:
     EDA_AVAILABLE = False
 
+@st.cache_data
+def compute_kicker_metrics(df: pd.DataFrame, player_name: str) -> dict:
+    """Compute and cache kicker metrics."""
+    kicker_data = df[df['player_name'] == player_name]
+    return {
+        'total_attempts': len(kicker_data),
+        'success_rate': kicker_data['success'].mean() * 100,
+        'avg_distance': kicker_data['attempt_yards'].mean(),
+    }
+
+@st.cache_data
+def compute_distance_binned_stats(df: pd.DataFrame, player_name: str, bin_size: int = 5) -> tuple:
+    """Compute and cache binned statistics for distance analysis."""
+    kicker_data = df[df['player_name'] == player_name].copy()
+    kicker_data['bin'] = (kicker_data['attempt_yards'] // bin_size) * bin_size
+    actual = kicker_data.groupby('bin')['success'].mean()
+    return actual.index.values, actual.values
+
 def plot_kicker_skill_posterior(
     suite,
     df: pd.DataFrame,
     player_name: str,
     bin_width: int = 50,
 ) -> Figure:
-    """
-    Compute and plot the posterior distribution of P(make) for a single kicker
-    at the empirical mean distance. Returns a matplotlib Figure.
-    """
+    """Compute and plot the posterior distribution of P(make) for a single kicker."""
     if not ARVIZ_AVAILABLE or not BAYESIAN_AVAILABLE:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "Bayesian analysis not available", ha='center', va='center')
@@ -99,6 +114,9 @@ def plot_kicker_skill_posterior(
     
     if suite._trace is None:
         raise ValueError("Model has not been fit yet")
+    
+    # Lazy import matplotlib
+    import matplotlib.pyplot as plt
         
     posterior = cast(az.InferenceData, suite._trace).posterior
     a = posterior["alpha"].values.flatten()
@@ -107,11 +125,42 @@ def plot_kicker_skill_posterior(
     u_k = u[:, k_idx]
     logit = a + b * 0.0 + u_k
     p = 1 / (1 + np.exp(-logit))
+    
     fig, ax = plt.subplots()
     ax.hist(p, bins=bin_width, density=True, alpha=0.8)
     ax.set_title(f"Posterior P(make) for {player_name}")
     ax.set_xlabel("Probability")
     ax.set_ylabel("Density")
+    return fig
+
+def plot_distance_comparison(
+    suite,
+    df: pd.DataFrame,
+    player_name: str,
+    bin_size: int = 5
+) -> Figure:
+    """Plot actual vs predicted success rates by distance."""
+    # Lazy import matplotlib
+    import matplotlib.pyplot as plt
+    
+    # Use cached computation for actual values
+    bins, actuals = compute_distance_binned_stats(df, player_name, bin_size)
+    
+    # Get predictions for this kicker's attempts
+    kicker_data = df[df['player_name'] == player_name]
+    preds = suite.predict(kicker_data)
+    kicker_data['predicted'] = preds
+    kicker_data['bin'] = (kicker_data['attempt_yards'] // bin_size) * bin_size
+    predicted = kicker_data.groupby('bin')['predicted'].mean()
+    
+    fig, ax = plt.subplots()
+    ax.plot(bins, actuals, marker='o', label='Actual', linewidth=2)
+    ax.plot(predicted.index, predicted.values, marker='s', label='Predicted', linestyle='--')
+    ax.set_xlabel('Distance (yards)')
+    ax.set_ylabel('Make Probability')
+    ax.set_title(f'Performance by Distance: {player_name}')
+    ax.legend()
+    plt.tight_layout()
     return fig
 
 def plot_kicker_epa_distribution(
@@ -167,7 +216,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Custom CSS for Broncos‑flavoured palette & rounded cards
+# Custom CSS for dark theme with Broncos‑flavoured palette
 BRONCOS_COLOURS = {
     "orange": "#fb4f14",
     "navy": "#0a2343",
@@ -175,26 +224,124 @@ BRONCOS_COLOURS = {
 }
 
 def inject_css() -> None:
+    """Inject a full dark theme with Broncos-styled custom styling."""
     st.markdown(
         f"""
         <style>
-        /* Global */
-        html, body, [class*="css"]  {{
+        /* Page background & text */
+        .appview-container, .main, .block-container {{
+            background-color: #121212 !important;
+            color: #E0E0E0 !important;
             font-family: "Inter", sans-serif;
         }}
-        /* Accent colour */
-        .st-bb  {{ border: none; }}
-        .st-bx  {{ border-radius: 0.75rem; }}
-        a, .st-de, .st-ag  {{ color: {BRONCOS_COLOURS['orange']} !important; }}
-        /* Header */
-        .block-container {{ padding-top: 2rem; }}
-        /* Tabs style */
-        div[data-baseweb="tab-list"] button  {{
+        
+        /* Sidebar container and elements */
+        [data-testid="stSidebar"] {{
+            background-color: #1E1E1E !important;
+            color: #E0E0E0 !important;
+        }}
+        [data-testid="stSidebarNav"] {{
+            background-color: #1E1E1E !important;
+            color: #E0E0E0 !important;
+        }}
+        [data-testid="stSidebar"] .css-1d391kg,
+        [data-testid="stSidebar"] .css-1aw8i8e,
+        [data-testid="stSidebar"] .css-1vq4p4l {{
+            background-color: transparent !important;
+        }}
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] h4 {{
+            color: {BRONCOS_COLOURS['orange']} !important;
+        }}
+        
+        /* Headers & titles */
+        h1, h2, h3, h4, .stHeader {{
+            color: #FFFFFF !important;
+        }}
+        
+        /* Buttons */
+        button[kind="primary"] {{
+            background-color: {BRONCOS_COLOURS['orange']} !important;
+            color: #121212 !important;
+            border-radius: 8px !important;
+        }}
+        
+        /* Metrics cards */
+        .stMetric {{
+            background-color: #1E1E1E !important;
+            border-radius: 8px !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        }}
+        
+        /* Tables & dataframes */
+        .css-1lcbmhc .css-1d391kg, .stDataFrame {{
+            background-color: #1E1E1E !important;
+            color: #E0E0E0 !important;
+        }}
+        .stDataFrame td, .stDataFrame th {{
+            background-color: #2A2A2A !important;
+        }}
+        
+        /* Tabs */
+        div[data-baseweb="tab-list"] button {{
+            background-color: transparent !important;
+            color: #E0E0E0 !important;
             border-bottom: 3px solid transparent;
         }}
+        
         div[data-baseweb="tab-list"] button[aria-selected="true"] {{
-            border-color: {BRONCOS_COLOURS['orange']};
-            color: {BRONCOS_COLOURS['orange']};
+            background-color: transparent !important;
+            color: {BRONCOS_COLOURS['orange']} !important;
+            border-color: {BRONCOS_COLOURS['orange']} !important;
+            border-radius: 0 !important;
+        }}
+        
+        /* Inputs & selects */
+        input, select, .stSelectbox, .stTextInput {{
+            background-color: #2A2A2A !important;
+            color: #E0E0E0 !important;
+            border: none !important;
+            border-radius: 4px !important;
+        }}
+        
+        /* Links and accents */
+        a, .st-de, .st-ag {{
+            color: {BRONCOS_COLOURS['orange']} !important;
+        }}
+        
+        /* Card styling */
+        .st-bb {{
+            border: none;
+        }}
+        .st-bx {{
+            border-radius: 0.75rem;
+        }}
+        
+        /* Header spacing */
+        .block-container {{
+            padding-top: 2rem;
+        }}
+        
+        /* Plot backgrounds */
+        .stPlot {{
+            background-color: #1E1E1E !important;
+            border-radius: 8px !important;
+            padding: 1rem !important;
+        }}
+        
+        /* Code blocks */
+        .stCodeBlock {{
+            background-color: #2A2A2A !important;
+            color: #E0E0E0 !important;
+            border-radius: 8px !important;
+        }}
+        
+        /* Dropdown menus */
+        .stSelectbox > div > div {{
+            background-color: #2A2A2A !important;
+            color: #E0E0E0 !important;
         }}
         </style>
         """,
@@ -243,61 +390,92 @@ def get_metrics_df(model_name: str) -> pd.DataFrame:
     ).reset_index().rename(columns={"index":"Metric"})
     return df
 
-@st.cache_data(show_spinner=False)
-def load_raw_data() -> pd.DataFrame:
+# Cache expensive resource instantiation
+@st.cache_resource
+def get_data_loader() -> Optional[DataLoader]:
+    """Cache DataLoader instance for reuse."""
     if not DATA_LOADER_AVAILABLE:
-        st.error("Data loader not available")
-        return pd.DataFrame()
-    loader = DataLoader()
-    return loader.load_complete_dataset()
+        return None
+    return DataLoader()
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource
+def get_data_preprocessor() -> Optional[DataPreprocessor]:
+    """Cache DataPreprocessor instance for reuse."""
+    if not DATA_PREPROCESSOR_AVAILABLE:
+        return None
+    return DataPreprocessor()
+
+@st.cache_data(show_spinner=False, ttl=3600)  # Cache for 1 hour
+def load_raw_data() -> pd.DataFrame:
+    """Load raw data with fallback between Parquet and CSV formats."""
+    loader = get_data_loader()
+    if loader is None:
+        return pd.DataFrame()
+        
+    try:
+        # Try Parquet first (faster)
+        parquet_path = Path("data/raw/field_goal_attempts.parquet")
+        if parquet_path.exists():
+            return pd.read_parquet(parquet_path)
+            
+        # Fallback to CSV
+        return loader.load_complete_dataset()
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(show_spinner=False, ttl=3600)
 def load_preprocessed_data() -> pd.DataFrame:
-    """Load and preprocess data so we have success, kicker_id, etc."""
-    if not DATA_LOADER_AVAILABLE or not DATA_PREPROCESSOR_AVAILABLE:
-        # Try to load from CSV files directly if available
+    """Load preprocessed data with optimized format handling."""
+    loader = get_data_loader()
+    preprocessor = get_data_preprocessor()
+    
+    if loader is None or preprocessor is None:
+        # Try to load from preprocessed files directly
         try:
-            # Look for preprocessed data file
+            # Check Parquet first
+            if hasattr(config, 'MODEL_DATA_FILE'):
+                parquet_path = config.MODEL_DATA_FILE.with_suffix('.parquet')
+                if parquet_path.exists():
+                    return pd.read_parquet(parquet_path)
+            
+            # Fallback to CSV locations
             if hasattr(config, 'MODEL_DATA_FILE') and config.MODEL_DATA_FILE.exists():
                 return pd.read_csv(config.MODEL_DATA_FILE)
-            elif hasattr(config, 'PROCESSED_DATA_DIR') and (config.PROCESSED_DATA_DIR / "field_goal_modeling_data.csv").exists():
-                return pd.read_csv(config.PROCESSED_DATA_DIR / "field_goal_modeling_data.csv")
-            else:
-                st.warning("Preprocessed data not available and modules not loaded")
-                return pd.DataFrame()
+            elif hasattr(config, 'PROCESSED_DATA_DIR'):
+                csv_path = config.PROCESSED_DATA_DIR / "field_goal_modeling_data.csv"
+                if csv_path.exists():
+                    return pd.read_csv(csv_path)
+            
+            st.warning("Preprocessed data not available and modules not loaded")
+            return pd.DataFrame()
         except Exception as e:
             st.warning(f"Error loading data files: {e}")
             return pd.DataFrame()
-    
+
     try:
-        loader = DataLoader()
-        raw = loader.load_complete_dataset()
-        pre = DataPreprocessor()
-        
-        # Safely access config attributes
-        min_distance = getattr(config, 'MIN_DISTANCE', 20)
-        max_distance = getattr(config, 'MAX_DISTANCE', 60)
-        min_kicker_attempts = getattr(config, 'MIN_KICKER_ATTEMPTS', 10)
-        season_types = getattr(config, 'SEASON_TYPES', ['Reg', 'Post'])
-        feature_lists = getattr(config, 'FEATURE_LISTS', {})
-        
-        # Update with your config settings
-        pre.update_config(
-            min_distance=min_distance,
-            max_distance=max_distance,
-            min_kicker_attempts=min_kicker_attempts,
-            season_types=season_types,
+        raw = load_raw_data()
+        if raw.empty:
+            return pd.DataFrame()
+            
+        # Update preprocessor config
+        preprocessor.update_config(
+            min_distance=getattr(config, 'MIN_DISTANCE', 20),
+            max_distance=getattr(config, 'MAX_DISTANCE', 60),
+            min_kicker_attempts=getattr(config, 'MIN_KICKER_ATTEMPTS', 10),
+            season_types=getattr(config, 'SEASON_TYPES', ['Reg', 'Post']),
             include_performance_history=True,
             include_statistical_features=False,
             include_player_status=True,
             performance_window=12,
         )
         
+        # Apply feature lists if available
+        feature_lists = getattr(config, 'FEATURE_LISTS', {})
         if feature_lists:
-            pre.update_feature_lists(**feature_lists)
+            preprocessor.update_feature_lists(**feature_lists)
         
-        # This both engineers and filters so we get a 'success' column, etc.
-        return pre.preprocess_complete(raw)
+        return preprocessor.preprocess_complete(raw)
     except Exception as e:
         st.error(f"Error in data preprocessing: {e}")
         return pd.DataFrame()
@@ -452,15 +630,25 @@ def find_bayesian_data_file() -> Optional[Path]:
     
     return None
 
+@st.cache_resource
+def get_bayesian_suite(suite_path: Path) -> Optional[BayesianModelSuite]:
+    """Cache BayesianModelSuite instance for reuse."""
+    if not BAYESIAN_AVAILABLE:
+        return None
+    try:
+        return BayesianModelSuite.load_suite(suite_path)
+    except Exception as e:
+        st.error(f"Error loading Bayesian suite: {e}")
+        return None
+
+@st.cache_data(ttl=3600)
 def find_bayesian_suite_dirs() -> List[Path]:
-    """Find Bayesian suite directories in multiple possible locations."""
+    """Find Bayesian suite directories with caching."""
     project_root = Path(__file__).parent.absolute()
     
     # List of possible locations for Bayesian suites
     possible_roots = [
-        # Primary location from config
         getattr(config, 'MODEL_DIR', None),
-        # Alternative locations
         project_root / "models" / "bayesian",
         Path("models/bayesian"),
         project_root / "bayesian",
@@ -487,30 +675,35 @@ def find_bayesian_suite_dirs() -> List[Path]:
     
     return unique_dirs
 
+@st.cache_data(ttl=3600)
 def load_bayesian_data_with_fallback() -> Optional[pd.DataFrame]:
-    """Load Bayesian features data with fallback to generating from raw data."""
+    """Load Bayesian features data with optimized caching."""
     data_file = find_bayesian_data_file()
     
     if data_file is not None:
         try:
-            df = pd.read_csv(data_file)
-            return df
+            # Try Parquet first
+            parquet_path = data_file.with_suffix('.parquet')
+            if parquet_path.exists():
+                return pd.read_parquet(parquet_path)
+            # Fallback to CSV
+            return pd.read_csv(data_file)
         except Exception as e:
             st.error(f"Error loading Bayesian data: {e}")
     
     # Fallback: Try to generate data from raw sources
     if DATA_LOADER_AVAILABLE and DATA_PREPROCESSOR_AVAILABLE:
         try:
-            # Load and process data
-            loader = DataLoader()
+            # Use cached loader
+            loader = get_data_loader()
+            if loader is None:
+                return None
             df_raw = loader.load_complete_dataset()
             
             # Create minimal preprocessor for Bayesian models
             from src.nfl_kicker_analysis.data.feature_engineering import FeatureEngineer
             engineer = FeatureEngineer()
-            df_feat = engineer.create_all_features(df_raw)
-            
-            return df_feat
+            return engineer.create_all_features(df_raw)
             
         except Exception as e:
             st.error("Error generating Bayesian features. Please check data availability.")
@@ -800,19 +993,17 @@ else:
                     kicker_names = sorted(df['player_name'].unique())
                     selected_kicker = st.selectbox("Select Kicker", kicker_names)
                     
-                    # Get kicker's data
-                    kicker_data = df[df['player_name'] == selected_kicker]
-
+                    # Use cached metrics computation
+                    metrics = compute_kicker_metrics(df, selected_kicker)
+                    
                     # Display key metrics in columns
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Total Attempts", f"{len(kicker_data):,}")
+                        st.metric("Total Attempts", f"{metrics['total_attempts']:,}")
                     with col2:
-                        success_rate = (kicker_data['success'].mean() * 100)
-                        st.metric("Success Rate", f"{success_rate:.1f}%")
+                        st.metric("Success Rate", f"{metrics['success_rate']:.1f}%")
                     with col3:
-                        avg_distance = kicker_data['attempt_yards'].mean()
-                        st.metric("Avg Distance", f"{avg_distance:.1f} yards")
+                        st.metric("Avg Distance", f"{metrics['avg_distance']:.1f} yards")
                     
                     st.markdown("---")
                     
@@ -826,34 +1017,12 @@ else:
                     
                     with viz_col2:
                         st.subheader("Prediction vs Actuals by Distance")
-                        # Filter data for this kicker and create distance bins
-                        kicker_data = kicker_data.copy()
-                        kicker_data['bin'] = (kicker_data['attempt_yards'] // 5) * 5
-                        
-                        # Get predictions for this kicker's attempts
-                        preds = suite.predict(kicker_data)
-                        kicker_data['predicted'] = preds
-                        
-                        # Group by distance bin
-                        actual = kicker_data.groupby('bin')['success'].mean()
-                        predicted = kicker_data.groupby('bin')['predicted'].mean()
-                        
-                        # Create the comparison plot
-                        fig, ax = plt.subplots()
-                        ax.plot(actual.index, actual.values, marker='o', label='Actual', linewidth=2)
-                        ax.plot(predicted.index, predicted.values, marker='s', label='Predicted', linestyle='--')
-                        ax.set_xlabel('Distance (yards)')
-                        ax.set_ylabel('Make Probability')
-                        ax.set_title(f'Performance by Distance: {selected_kicker}')
-                        ax.legend()
-                        plt.tight_layout()
-                        st.pyplot(fig)
-                        
-                        # Add a note about the data
+                        fig_dist = plot_distance_comparison(suite, df, selected_kicker)
+                        st.pyplot(fig_dist)
                         st.caption("Note: Predictions are binned into 5-yard intervals for clearer visualization.")
                         
-                except Exception:
-                    st.error("Error generating kicker analysis plots")
+                except Exception as e:
+                    st.error(f"Error generating kicker analysis plots: {e}")
 
             # Tab D: EDA & Analytics
             with eda_tab:
@@ -948,7 +1117,3 @@ except FileNotFoundError:
     st.error("Technical paper not found. Please ensure the paper file exists.")
 except Exception:
     st.error("Error loading technical paper")
-
-
-
-

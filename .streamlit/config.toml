@@ -8,7 +8,13 @@ maxUploadSize = 200
 gatherUsageStats = false
 
 [theme]
-primaryColor = "#FF6B35"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
+base="dark"
+primaryColor="#fb4f14"  # Broncos orange
+backgroundColor="#121212"  # Dark background
+secondaryBackgroundColor="#1E1E1E"  # Slightly lighter for cards
+textColor="#E0E0E0"  # Light text
+
+[theme.sidebar]
+backgroundColor="#1E1E1E"
+secondaryBackgroundColor="#2A2A2A"
+textColor="#E0E0E0"
