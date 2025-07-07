@@ -351,7 +351,7 @@ def inject_css() -> None:
 inject_css()
 
 st.sidebar.header("⚙️ Select Model")
-model_types = ["Point Estimate Models", "Uncertainty Interval Models"]
+model_types = ["Uncertainty Interval Models", "Point Estimate Models"]
 model_type = st.sidebar.selectbox("Model Type", model_types)
 
 # ======== Model Directories Setup =========
