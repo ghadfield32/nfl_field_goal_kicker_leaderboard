@@ -53,8 +53,8 @@ class Config:
     ]
     
     # Model parameters
-    BAYESIAN_MCMC_SAMPLES = 2_000
-    BAYESIAN_TUNE = 1_000
+    BAYESIAN_MCMC_SAMPLES = 500
+    BAYESIAN_TUNE = 250
     BAYESIAN_CHAINS = 2
     
     # Rating thresholds
