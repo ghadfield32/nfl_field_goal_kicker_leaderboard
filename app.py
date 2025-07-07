@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from typing import Optional, cast
+import os
 
 # Try to import optional dependencies
 try:
@@ -416,6 +417,35 @@ def get_bayesian_metrics(suite_dir: Path, df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index().rename(columns={"index":"Metric"})
     return dfm
 
+# ── Automatic setup for Streamlit Cloud ──
+def setup_for_cloud():
+    """Automatically copy leaderboard files for Streamlit Cloud compatibility."""
+    try:
+        # Only run this in cloud environments or if leaderboards are missing
+        project_root = Path(__file__).parent.absolute()
+        source_dir = project_root / "output"
+        
+        # Check if we need to copy files
+        missing_leaderboards = []
+        for model_name in ["catboost", "random_forest", "ridge_logistic", "simple_logistic", "xgboost"]:
+            if not (project_root / f"{model_name}_leaderboard.csv").exists():
+                missing_leaderboards.append(model_name)
+        
+        # If any leaderboards are missing and source exists, copy them
+        if missing_leaderboards and source_dir.exists():
+            import shutil
+            for csv_file in source_dir.glob("*leaderboard.csv"):
+                target_file = project_root / csv_file.name
+                if not target_file.exists():
+                    shutil.copy2(csv_file, target_file)
+    except Exception:
+        pass  # Silently fail if there are any issues
+
+# Run setup
+setup_for_cloud()
+
+# === Main Streamlit App ===
+
 if model_type == "Point Estimate Models":
     st.sidebar.subheader("🏆 Point Estimate Models")
     if all_models:
@@ -437,7 +467,37 @@ if model_type == "Point Estimate Models":
                 model = None
                 
         except Exception as e:
-            st.warning(f"⚠️ Model '{selected_model}' not available: {e}")
+            st.error(f"❌ Model '{selected_model}' not available: {e}")
+            
+            # Enhanced debugging for model loading issues
+            with st.expander("🔍 Debug: Model Loading Details", expanded=False):
+                st.write(f"**Selected Model:** {selected_model}")
+                st.write(f"**Available in filesystem:** {selected_model in fs_models}")
+                st.write(f"**Available in MLflow:** {selected_model in mlflow_models}")
+                st.write(f"**Point estimate directory:** {point_estimate_dir}")
+                st.write(f"**Directory exists:** {point_estimate_dir.exists()}")
+                
+                # Show detailed error information
+                import traceback
+                st.code(traceback.format_exc(), language="python")
+                
+                # Show the actual model directory structure
+                if point_estimate_dir.exists():
+                    st.write("**Model directory contents:**")
+                    for item in point_estimate_dir.iterdir():
+                        if item.is_dir():
+                            st.write(f"📁 {item.name}/")
+                            # Show version directories
+                            for sub_item in item.iterdir():
+                                if sub_item.is_dir():
+                                    st.write(f"  📁 {sub_item.name}/")
+                                    # Show files in version directory
+                                    for file in sub_item.iterdir():
+                                        if file.is_file():
+                                            st.write(f"    📄 {file.name}")
+                                else:
+                                    st.write(f"  📄 {sub_item.name}")
+            
             model = None
     else:
         st.info("No trained models found. Showing available data without model predictions.")
@@ -468,18 +528,31 @@ if model_type == "Point Estimate Models":
     with lb_tab:
         st.header(f"{selected_model.replace('_',' ').title()} Leaderboard")
         
-        # Try multiple leaderboard file locations
+        # Try multiple leaderboard file locations with absolute paths
         possible_files = []
+        
+        # Use absolute paths based on the project root
+        project_root = Path(__file__).parent.absolute()
+        
+        # Primary locations to check
+        possible_files.extend([
+            project_root / "output" / f"{selected_model}_leaderboard.csv",
+            project_root / "data" / "processed" / f"{selected_model}_leaderboard.csv",
+            project_root / f"{selected_model}_leaderboard.csv",
+        ])
+        
+        # Also try config-based paths if available
         if hasattr(config, 'OUTPUT_DIR'):
             possible_files.append(config.OUTPUT_DIR / f"{selected_model}_leaderboard.csv")
+        if hasattr(config, 'PROCESSED_DATA_DIR'):
+            possible_files.append(config.PROCESSED_DATA_DIR / f"{selected_model}_leaderboard.csv")
         
-        # Also try current directory and common locations
-        from pathlib import Path
-        possible_files.extend([
-            Path("output") / f"{selected_model}_leaderboard.csv",
-            Path(".") / f"{selected_model}_leaderboard.csv",
-            Path("data") / "processed" / f"{selected_model}_leaderboard.csv"
-        ])
+        # Debug: Show which files we're looking for
+        with st.expander("🔍 Debug: Leaderboard File Search", expanded=False):
+            st.write("Looking for leaderboard files in:")
+            for f in possible_files:
+                exists = f.exists()
+                st.write(f"{'✅' if exists else '❌'} {f} (exists: {exists})")
         
         leaderboard_found = False
         for lb_file in possible_files:
@@ -494,6 +567,8 @@ if model_type == "Point Estimate Models":
                                 st.write(f"**Accuracy:** {accuracy:.3f}")
                         except Exception:
                             pass  # Skip accuracy display if not available
+                    
+                    st.success(f"✅ Loaded leaderboard from: {lb_file}")
                     st.dataframe(df_lb)
                     leaderboard_found = True
                     break
@@ -501,7 +576,59 @@ if model_type == "Point Estimate Models":
                     st.warning(f"Error reading {lb_file}: {e}")
         
         if not leaderboard_found:
-            st.info(f"No leaderboard file found for {selected_model}. The model may not have been trained yet.")
+            # If no leaderboard file found, try to generate one on-the-fly if we have a model
+            if model is not None and not load_preprocessed_data().empty:
+                st.info(f"No pre-generated leaderboard found for {selected_model}. Generating on-the-fly...")
+                try:
+                    # Generate leaderboard on-the-fly
+                    data = load_preprocessed_data()
+                    
+                    # Simple leaderboard generation
+                    if 'player_name' in data.columns and 'success' in data.columns:
+                        leaderboard = (
+                            data.groupby('player_name')
+                            .agg({
+                                'success': ['count', 'sum', 'mean'],
+                                'attempt_yards': 'mean'
+                            })
+                            .round(3)
+                        )
+                        
+                        # Flatten column names
+                        leaderboard.columns = ['attempts', 'made', 'success_rate', 'avg_distance']
+                        leaderboard = leaderboard.reset_index()
+                        
+                        # Filter for minimum attempts
+                        leaderboard = leaderboard[leaderboard['attempts'] >= 10]
+                        
+                        # Sort by success rate
+                        leaderboard = leaderboard.sort_values('success_rate', ascending=False)
+                        
+                        # Add rank
+                        leaderboard['rank'] = range(1, len(leaderboard) + 1)
+                        
+                        # Reorder columns
+                        leaderboard = leaderboard[['rank', 'player_name', 'attempts', 'success_rate', 'avg_distance']]
+                        
+                        st.dataframe(leaderboard)
+                        leaderboard_found = True
+                        
+                except Exception as e:
+                    st.error(f"Error generating leaderboard: {e}")
+            
+            if not leaderboard_found:
+                st.warning(f"No leaderboard available for {selected_model}. The model may not have been trained yet, or leaderboard files may not be available in this environment.")
+                
+                # Show available files for debugging
+                with st.expander("🔍 Debug: Available Files", expanded=False):
+                    st.write("Available files in project directory:")
+                    try:
+                        for root, dirs, files in os.walk(project_root):
+                            for file in files:
+                                if file.endswith('.csv'):
+                                    st.write(f"📄 {Path(root) / file}")
+                    except Exception as e:
+                        st.write(f"Error listing files: {e}")
 
     # ── Tab C: EDA & Analytics (always available) ───────────
     with eda_tab:

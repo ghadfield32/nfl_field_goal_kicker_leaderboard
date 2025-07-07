@@ -423,10 +423,13 @@ def _load_model_from_registry_metadata(
         
         # Convert workspace path to actual path
         if artifacts_path.startswith('/workspace/'):
-            artifacts_path = artifacts_path.replace('/workspace/', str(config.PROJECT_ROOT) + '/')
-            artifacts_path = artifacts_path.replace('/', '\\')
+            # Replace /workspace/ with the actual project root
+            relative_path = artifacts_path[11:]  # Remove '/workspace/'
+            artifacts_path = config.PROJECT_ROOT / relative_path
+        else:
+            # Handle other file:// paths
+            artifacts_path = Path(artifacts_path)
         
-        artifacts_path = Path(artifacts_path)
         print(f"[DEBUG] Artifacts path: {artifacts_path}")
         
         if not artifacts_path.exists():
