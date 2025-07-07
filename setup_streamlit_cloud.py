@@ -59,18 +59,33 @@ def setup_streamlit_cloud():
         if not target_root.exists():
             shutil.copy2(bayesian_features_source, target_root)
             print(f"   ✅ Copied bayesian_features.csv to project root")
-        else:
-            print(f"   ⏭️  bayesian_features.csv already exists in project root")
         
         # Copy to data/processed/
         target_processed = processed_dir / "bayesian_features.csv"
         if not target_processed.exists():
             shutil.copy2(bayesian_features_source, target_processed)
             print(f"   ✅ Copied bayesian_features.csv to data/processed/")
-        else:
-            print(f"   ⏭️  bayesian_features.csv already exists in data/processed/")
     else:
         print("   ⚠️  bayesian_features.csv not found in output/")
+    
+    # === NEW: Copy main Bayesian leaderboard ===
+    bayesian_leaderboard_source = project_root / "output" / "leaderboard.csv"
+    if bayesian_leaderboard_source.exists():
+        print(f"   ✅ Found leaderboard.csv (Bayesian EPA leaderboard) in output/")
+        
+        # Copy to project root for Streamlit Cloud
+        target_root = project_root / "leaderboard.csv"
+        if not target_root.exists():
+            shutil.copy2(bayesian_leaderboard_source, target_root)
+            print(f"   ✅ Copied leaderboard.csv to project root")
+        
+        # Copy to data/processed/ as well
+        target_processed = processed_dir / "leaderboard.csv"
+        if not target_processed.exists():
+            shutil.copy2(bayesian_leaderboard_source, target_processed)
+            print(f"   ✅ Copied leaderboard.csv to data/processed/")
+    else:
+        print("   ⚠️  leaderboard.csv (Bayesian EPA leaderboard) not found in output/")
     
     # Check Bayesian model directories
     bayesian_models_dir = project_root / "models" / "bayesian"

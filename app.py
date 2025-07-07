@@ -443,25 +443,50 @@ def setup_for_cloud():
                 target_file = project_root / csv_file.name
                 if not target_file.exists():
                     shutil.copy2(csv_file, target_file)
-                    
-        # Setup Bayesian model files - copy bayesian_features.csv to multiple locations
-        bayesian_features_source = project_root / "output" / "bayesian_features.csv"
-        if bayesian_features_source.exists():
-            # Copy to project root for easy access
-            target_root = project_root / "bayesian_features.csv"
-            if not target_root.exists():
+                    print(f"✅ Copied {csv_file.name} to project root")
+        
+        # === NEW: Ensure Bayesian leaderboard is available ===
+        bayesian_leaderboard_files = [
+            "leaderboard.csv",  # Main Bayesian leaderboard
+            "bayesian_features.csv"  # Bayesian features data
+        ]
+        
+        for filename in bayesian_leaderboard_files:
+            source_file = source_dir / filename
+            target_file = project_root / filename
+            
+            if source_file.exists() and not target_file.exists():
                 import shutil
-                shutil.copy2(bayesian_features_source, target_root)
-                
-            # Copy to data/processed for alternative path
-            data_processed = project_root / "data" / "processed"
-            data_processed.mkdir(parents=True, exist_ok=True)
-            target_processed = data_processed / "bayesian_features.csv"
-            if not target_processed.exists():
-                shutil.copy2(bayesian_features_source, target_processed)
-                
-    except Exception:
-        pass  # Silently fail if there are any issues
+                shutil.copy2(source_file, target_file)
+                print(f"✅ Copied {filename} to project root for cloud deployment")
+        
+        return True
+    except Exception as e:
+        print(f"⚠️ Warning: Setup for cloud failed: {e}")
+        return False
+
+def find_bayesian_leaderboard() -> Optional[Path]:
+    """Find the Bayesian EPA leaderboard file in various locations."""
+    project_root = Path(__file__).parent.absolute()
+    
+    # Priority order for leaderboard search
+    possible_locations = [
+        project_root / "leaderboard.csv",  # Cloud deployment location
+        project_root / "output" / "leaderboard.csv",  # Local development location
+        project_root / "data" / "processed" / "leaderboard.csv",  # Alternative location
+    ]
+    
+    # Check config location if available
+    try:
+        possible_locations.append(config.LEADERBOARD_FILE)
+    except:
+        pass
+    
+    for location in possible_locations:
+        if location.exists():
+            return location
+    
+    return None
 
 # === Enhanced Bayesian model loading functions ===
 def find_bayesian_data_file() -> Optional[Path]:
@@ -931,41 +956,92 @@ else:
             with lb_tab:
                 st.header("🔬 Bayesian EPA-FG⁺ Leaderboard with 95% CI")
                 
-                try:
-                    # Generate EPA leaderboard with error handling
-                    with st.spinner("Generating EPA leaderboard..."):
-                        df_ci = (
-                            suite.epa_fg_plus(df,
-                                            n_samples=config.BAYESIAN_MCMC_SAMPLES,
-                                            return_ci=True)
-                                 .reset_index()
-                                 .sort_values("epa_fg_plus_mean", ascending=False)
-                        )
-                    st.dataframe(df_ci)
-                    
-                    # Add download button for the leaderboard
-                    csv = df_ci.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download EPA Leaderboard as CSV",
-                        data=csv,
-                        file_name=f"bayesian_epa_leaderboard_{selected}.csv",
-                        mime="text/csv"
-                    )
-                    
-                except Exception as e:
-                    st.error(f"❌ Error generating EPA leaderboard: {e}")
-                    st.info("This may be due to missing dependencies or data incompatibility.")
-                    
-                    # Show debug information
-                    with st.expander("🔧 Debug Information"):
-                        st.write("**Suite Information:**")
-                        st.write(f"- Suite path: {suite_path}")
-                        st.write(f"- Data shape: {df.shape}")
-                        st.write(f"- Data columns: {list(df.columns)}")
+                # First try to load the pre-saved leaderboard
+                leaderboard_file = find_bayesian_leaderboard()
+                
+                if leaderboard_file is not None:
+                    try:
+                        st.info(f"📁 Loading pre-saved Bayesian leaderboard from {leaderboard_file.name}")
+                        df_leaderboard = pd.read_csv(leaderboard_file)
                         
-                        # Show traceback
-                        import traceback
-                        st.code(traceback.format_exc())
+                        # Ensure we have the required columns
+                        required_cols = ['player_name', 'epa_fg_plus_mean', 'rank']
+                        if all(col in df_leaderboard.columns for col in required_cols):
+                            # Sort by rank for display
+                            df_leaderboard = df_leaderboard.sort_values('rank')
+                            
+                            # Display the leaderboard
+                            st.dataframe(df_leaderboard)
+                            
+                            # Add download button for the leaderboard
+                            csv = df_leaderboard.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Download EPA Leaderboard as CSV",
+                                data=csv,
+                                file_name=f"bayesian_epa_leaderboard_{selected}.csv",
+                                mime="text/csv"
+                            )
+                            
+                            # Show summary statistics
+                            st.subheader("📊 Leaderboard Summary")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total Kickers", len(df_leaderboard))
+                            with col2:
+                                top_epa = df_leaderboard['epa_fg_plus_mean'].max()
+                                st.metric("Top EPA-FG⁺", f"{top_epa:.4f}")
+                            with col3:
+                                avg_epa = df_leaderboard['epa_fg_plus_mean'].mean()
+                                st.metric("Average EPA-FG⁺", f"{avg_epa:.4f}")
+                                
+                            st.success("✅ Successfully loaded pre-saved Bayesian leaderboard")
+                            
+                        else:
+                            st.warning(f"⚠️ Leaderboard file missing required columns. Found: {list(df_leaderboard.columns)}")
+                            raise ValueError("Missing required columns")
+                            
+                    except Exception as e:
+                        st.warning(f"⚠️ Error loading pre-saved leaderboard: {e}")
+                        st.info("Falling back to generating leaderboard on-the-fly...")
+                        leaderboard_file = None  # Force fallback
+                
+                # Fallback: Generate leaderboard on-the-fly if no saved file or loading failed
+                if leaderboard_file is None:
+                    try:
+                        st.info("🔄 Generating EPA leaderboard on-the-fly (this may take a moment)...")
+                        with st.spinner("Computing Bayesian EPA leaderboard..."):
+                            df_ci = (
+                                suite.epa_fg_plus(df,
+                                                n_samples=config.BAYESIAN_MCMC_SAMPLES,
+                                                return_ci=True)
+                                     .reset_index()
+                                     .sort_values("epa_fg_plus_mean", ascending=False)
+                            )
+                        st.dataframe(df_ci)
+                        
+                        # Add download button for the leaderboard
+                        csv = df_ci.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download EPA Leaderboard as CSV",
+                            data=csv,
+                            file_name=f"bayesian_epa_leaderboard_{selected}.csv",
+                            mime="text/csv"
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error generating EPA leaderboard: {e}")
+                        st.info("This may be due to missing dependencies or data incompatibility.")
+                        
+                        # Show debug information
+                        with st.expander("🔧 Debug Information"):
+                            st.write("**Suite Information:**")
+                            st.write(f"- Suite path: {suite_path}")
+                            st.write(f"- Data shape: {df.shape}")
+                            st.write(f"- Data columns: {list(df.columns)}")
+                            
+                            # Show traceback
+                            import traceback
+                            st.code(traceback.format_exc())
 
             # Tab 2: Kicker Analysis
             with kicker_tab:
