@@ -1093,26 +1093,30 @@ else:
                 
                 if EDA_AVAILABLE:
                     try:
-                        # Display EDA plots
-                        st.subheader("📈 Distance vs Success Analysis")
-                        fig1, ax1 = plt.subplots(figsize=(10, 6))
-                        distance_analysis(df, savefig=None)
-                        st.pyplot(fig1)
-                        
-                        st.subheader("⏰ Temporal Analysis")
-                        fig2, ax2 = plt.subplots(figsize=(12, 8))
-                        temporal_analysis(df, savefig=None)
-                        st.pyplot(fig2)
-                        
-                        st.subheader("🎯 Kicker Performance Analysis")
-                        fig3, ax3 = plt.subplots(figsize=(15, 12))
-                        kicker_performance_analysis(df, savefig=None)
-                        st.pyplot(fig3)
-                        
-                        st.subheader("🔗 Feature Correlations")
-                        fig4, ax4 = plt.subplots(figsize=(8, 6))
-                        feature_engineering(df, savefig=None)
-                        st.pyplot(fig4)
+                        st.subheader("Overall Outcome Distribution")
+                        _, fig_out = outcome_summary(df)
+                        st.pyplot(fig_out)
+
+                        st.subheader("Success Rate vs Distance")
+                        _, fig_dist = distance_analysis(df)
+                        st.pyplot(fig_dist)
+
+                        st.subheader("Temporal Trends & Age")
+                        _, fig_temp = temporal_analysis(df)
+                        st.pyplot(fig_temp)
+
+                        st.subheader("Kicker Performance Dashboard")
+                        _, fig_kick = kicker_performance_analysis(df)
+                        st.pyplot(fig_kick)
+
+                        st.subheader("Feature Correlation Matrix")
+                        fig_corr = feature_engineering(df)
+                        st.pyplot(fig_corr)
+
+                        st.markdown("---")
+                        st.caption(
+                            "Plots generated on-the-fly using reusable utilities from the core package."
+                        )
                         
                     except Exception as e:
                         st.error(f"Error generating EDA plots: {str(e)}")
@@ -1241,4 +1245,6 @@ except FileNotFoundError:
     )
 except Exception as e:
     st.error(f"Error loading technical paper: {str(e)}")
+
+
 
