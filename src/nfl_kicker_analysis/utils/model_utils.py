@@ -30,8 +30,9 @@ import pandas as pd
 import numpy as np
 import cloudpickle
 
-DEFAULT_DIR = Path("/workspace/models")
-MLRUNS_DIR = Path("/workspace/mlruns")
+# Use config paths instead of hardcoded ones
+DEFAULT_DIR = config.MODELS_DIR / "mlruns" / "models"  # Point estimate models go here
+MLRUNS_DIR = config.PROJECT_ROOT / "mlruns"
 
 def cleanup_all_models():
     """
@@ -292,6 +293,7 @@ def save_model(
 # ── New imports ─────────────────────────────────────────────
 from mlflow.sklearn import load_model as sklearn_load_model
 from mlflow.pyfunc import load_model as pyfunc_load_model
+import yaml
 # ──────────────────────────────────────────────────────────
 
 def load_model(
@@ -300,30 +302,42 @@ def load_model(
     base_dir: Path = DEFAULT_DIR
 ) -> Any:
     """
-    Load a saved model:
+    Load a saved model with enhanced MLflow registry support:
       1) Try the sklearn flavor (full API w/ predict_proba).
       2) Fallback to the pyfunc flavor (generic predict-only).
-      3) Fallback to local filesystem (joblib/cloudpickle).
+      3) Fallback to local filesystem using MLflow registry metadata.
+      4) Final fallback to legacy local filesystem (joblib/cloudpickle).
     """
     model_uri = f"models:/{name}/{version or 'latest'}"
+    
+    print(f"[DEBUG] Loading model '{name}' (version: {version or 'latest'})")
 
-    # 1️⃣ sklearn flavor
+    # 1. sklearn flavor
     try:
         model = sklearn_load_model(model_uri)
-        print(f"🔄 Loaded sklearn model '{name}' from '{model_uri}'")
+        print(f"[SUCCESS] Loaded sklearn model '{name}' from '{model_uri}'")
         return model
     except Exception as e:
-        print(f"⚠️ sklearn flavor load failed ({e}); trying pyfunc...")
+        print(f"[WARNING] sklearn flavor load failed ({e}); trying pyfunc...")
 
-    # 2️⃣ pyfunc flavor
+    # 2. pyfunc flavor
     try:
         model = pyfunc_load_model(model_uri)
-        print(f"🔄 Loaded pyfunc model '{name}' from '{model_uri}'")
+        print(f"[SUCCESS] Loaded pyfunc model '{name}' from '{model_uri}'")
         return model
     except Exception as e:
-        print(f"⚠️ pyfunc flavor load failed ({e}); trying local filesystem...")
+        print(f"[WARNING] pyfunc flavor load failed ({e}); trying MLflow registry metadata...")
 
-    # 3️⃣ Filesystem fallback
+    # 3. MLflow registry metadata fallback
+    try:
+        model = _load_model_from_registry_metadata(name, version, base_dir)
+        if model is not None:
+            print(f"[SUCCESS] Loaded model '{name}' from MLflow registry metadata")
+            return model
+    except Exception as e:
+        print(f"[WARNING] MLflow registry metadata load failed ({e}); trying legacy filesystem...")
+
+    # 4. Legacy filesystem fallback
     model_root = base_dir / name
     if not model_root.exists():
         raise FileNotFoundError(f"No model directory for '{name}' at {model_root}")
@@ -336,16 +350,111 @@ def load_model(
 
     joblib_path = model_dir / "model.joblib"
     if joblib_path.exists():
+        print(f"[SUCCESS] Loaded model '{name}' from legacy joblib: {joblib_path}")
         return joblib.load(joblib_path)
 
     pkl_path = model_dir / "model.pkl"
     if pkl_path.exists():
         import cloudpickle
         with open(pkl_path, "rb") as f:
+            print(f"[SUCCESS] Loaded model '{name}' from legacy pickle: {pkl_path}")
             return cloudpickle.load(f)
 
     raise FileNotFoundError(f"No model file in {model_dir}. Expected 'model.joblib' or 'model.pkl'.")
 
+
+def _load_model_from_registry_metadata(
+    name: str,
+    version: str | None = "latest",
+    base_dir: Path = DEFAULT_DIR
+) -> Any:
+    """
+    Load a model by reading MLflow registry metadata to find the actual storage location.
+    
+    Args:
+        name: Model name
+        version: Version (or "latest")
+        base_dir: Base directory for model registry
+        
+    Returns:
+        Loaded model or None if not found
+    """
+    # Find the model registry directory
+    models_registry_dir = config.PROJECT_ROOT / "mlruns" / "models" / name
+    if not models_registry_dir.exists():
+        raise FileNotFoundError(f"No model registry directory for '{name}' at {models_registry_dir}")
+    
+    # Find version directories
+    version_dirs = [d for d in models_registry_dir.iterdir() if d.is_dir()]
+    if not version_dirs:
+        raise FileNotFoundError(f"No version directories for '{name}' in {models_registry_dir}")
+    
+    # Select version directory
+    if version == "latest" or version is None:
+        # Sort by version number (extract number from version-X)
+        version_dirs.sort(key=lambda d: int(d.name.split('-')[1]) if '-' in d.name else 0, reverse=True)
+        version_dir = version_dirs[0]
+    else:
+        version_dir = models_registry_dir / f"version-{version}"
+        if not version_dir.exists():
+            raise FileNotFoundError(f"Version directory '{version_dir}' not found")
+    
+    print(f"[DEBUG] Reading metadata from: {version_dir}")
+    
+    # Read metadata
+    meta_file = version_dir / "meta.yaml"
+    if not meta_file.exists():
+        raise FileNotFoundError(f"Metadata file not found: {meta_file}")
+    
+    with open(meta_file, 'r') as f:
+        metadata = yaml.safe_load(f)
+    
+    # Extract storage location
+    storage_location = metadata.get('storage_location', '')
+    if not storage_location:
+        raise ValueError(f"No storage_location found in metadata for '{name}'")
+    
+    print(f"[DEBUG] Storage location: {storage_location}")
+    
+    # Parse storage location to find artifacts
+    if storage_location.startswith('file://'):
+        # Remove file:// prefix and handle path conversion
+        artifacts_path = storage_location[7:]  # Remove 'file://'
+        
+        # Convert workspace path to actual path
+        if artifacts_path.startswith('/workspace/'):
+            artifacts_path = artifacts_path.replace('/workspace/', str(config.PROJECT_ROOT) + '/')
+            artifacts_path = artifacts_path.replace('/', '\\')
+        
+        artifacts_path = Path(artifacts_path)
+        print(f"[DEBUG] Artifacts path: {artifacts_path}")
+        
+        if not artifacts_path.exists():
+            raise FileNotFoundError(f"Artifacts directory not found: {artifacts_path}")
+        
+        # Try to load the model from artifacts
+        # First try model.pkl (most common for sklearn models)
+        pkl_path = artifacts_path / "model.pkl"
+        if pkl_path.exists():
+            print(f"[DEBUG] Loading from: {pkl_path}")
+            import cloudpickle
+            with open(pkl_path, "rb") as f:
+                return cloudpickle.load(f)
+        
+        # Then try model.joblib
+        joblib_path = artifacts_path / "model.joblib"
+        if joblib_path.exists():
+            print(f"[DEBUG] Loading from: {joblib_path}")
+            return joblib.load(joblib_path)
+        
+        # Check what files are actually available
+        available_files = list(artifacts_path.iterdir())
+        print(f"[WARNING] Available files in artifacts: {[f.name for f in available_files]}")
+        
+        raise FileNotFoundError(f"No model file found in {artifacts_path}. Expected 'model.pkl' or 'model.joblib'")
+    
+    else:
+        raise ValueError(f"Unsupported storage location format: {storage_location}")
 
 from mlflow.tracking import MlflowClient
 

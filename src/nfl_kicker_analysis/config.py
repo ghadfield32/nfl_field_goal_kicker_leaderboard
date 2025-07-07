@@ -9,14 +9,20 @@ import os
 class Config:
     """Main configuration class for the NFL Kicker Analysis package."""
     MLFLOW_EXPERIMENT_NAME="nfl_kicker_analysis"
-    # Base paths
-    PROJECT_ROOT = Path("/workspace")
+    
+    # Base paths - use relative paths that work in both local and cloud environments
+    # Get the project root by going up from this config file location
+    _CONFIG_DIR = Path(__file__).parent.parent.parent  # Go up to project root
+    PROJECT_ROOT = _CONFIG_DIR.resolve()
+    
     DATA_DIR = PROJECT_ROOT / "data"
     RAW_DATA_DIR = DATA_DIR / "raw"
     PROCESSED_DATA_DIR = DATA_DIR / "processed"
     OUTPUT_DIR = PROJECT_ROOT / "output"
-    MODELS_DIR = PROJECT_ROOT / "models"  # Base models directory
+    MODELS_DIR = PROJECT_ROOT / "models"  # Bayesian models directory
     MODEL_DIR = MODELS_DIR / "bayesian"   # Specific directory for Bayesian models
+    POINT_ESTIMATE_DIR = MODELS_DIR / "mlruns" / "models"  # Point estimate models go here
+    
     
     # Raw data files
     KICKERS_FILE = RAW_DATA_DIR / "kickers.csv"
@@ -29,6 +35,7 @@ class Config:
     
     # Analysis parameters
     MIN_DISTANCE = 20
+    min_distance = 20
     MAX_DISTANCE = 60
     MIN_KICKER_ATTEMPTS = 10  # Changed from 8 to 5 to match Method B
     

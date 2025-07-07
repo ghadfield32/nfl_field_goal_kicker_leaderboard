@@ -1,6 +1,6 @@
 """Models module for NFL kicker analysis."""
 
-from .tree_based_bayes_optimized_models import TreeBasedModelSuite
-from .bayesian_timeseries import TimeSeriesBayesianModelSuite
+# Avoid imports that might cause circular dependencies or missing modules
+# Import specific models only when needed
 
-__all__ = ['TreeBasedModelSuite', 'TimeSeriesBayesianModelSuite']
+__all__ = []

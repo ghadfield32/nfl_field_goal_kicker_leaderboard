@@ -23,7 +23,7 @@ from scipy import sparse
 
 from src.nfl_kicker_analysis.data.feature_engineering import FeatureEngineer
 from src.nfl_kicker_analysis.data.feature_schema import FeatureSchema
-from src.nfl_kicker_analysis import config
+from src.nfl_kicker_analysis.config import config
 
 
 # Type variables for better type hints
@@ -68,7 +68,7 @@ class DataPreprocessor:
         self._feature_cols_: List[str] | None = None
         
         # 2️⃣ Immediately inject defaults from the global config instance
-        from src.nfl_kicker_analysis import config
+        from src.nfl_kicker_analysis.config import config
         defaults = config  # config is already the Config() instance
         
         self.update_config(
