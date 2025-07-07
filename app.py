@@ -1029,8 +1029,3 @@ except FileNotFoundError:
 except Exception as e:
     st.error(f"Error loading technical paper: {str(e)}")
 
-
-
-
-
-

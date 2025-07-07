@@ -6,9 +6,13 @@ A comprehensive toolkit for analyzing NFL field goal kicker performance.
 __version__ = "1.0.0"
 __author__ = "NFL Analytics Team"
 
-# Only import the config to avoid circular imports
-# Other imports can be done explicitly when needed
+# Import main classes for easy access
+from .config import config
+from .data.loader import DataLoader
+from .data.preprocessor import DataPreprocessor
+
 __all__ = [
-    '__version__',
-    '__author__'
+    'config',
+    'DataLoader',
+    'DataPreprocessor'
 ]

@@ -2,7 +2,7 @@
 Data module for NFL kicker analysis.
 """
 
-# Avoid imports that might cause circular dependencies
-# Import specific modules only when needed
+from .loader import DataLoader
+from .preprocessor import DataPreprocessor
 
-__all__ = []
+__all__ = ['DataLoader', 'DataPreprocessor']
